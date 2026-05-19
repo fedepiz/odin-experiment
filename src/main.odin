@@ -26,15 +26,15 @@ Vertex :: struct {
 }
 
 GL: struct {
-	program:      u32,
-	vao:          u32,
-	vbo:          u32,
-	ebo:          u32,
-	vertices:     [1024]Vertex,
-	num_vertices: int,
-	indices:      [1024]u32,
-	num_indices:  int,
-	textures:     [1024]Texture,
+	program:         u32,
+	vao:             u32,
+	vbo:             u32,
+	ebo:             u32,
+	vertices:        [1024]Vertex,
+	num_vertices:    int,
+	indices:         [1024]u32,
+	num_indices:     int,
+	sprite_textures: [1024]Texture,
 }
 
 gl_init :: proc() {
@@ -207,7 +207,11 @@ batch_quads :: proc(alloc: mem.Allocator, quads: []game.Quad) -> [][]game.Quad {
 			prev_quad := batch[idx]
 			// If the quads are incompatible, start a new batch
 			if !quad_is_compatible(quad, prev_quad) {
-				append(&batches, batch[:])
+				// Copy the batch
+				to_append: []game.Quad = make_slice([]game.Quad, len(batch), alloc)
+				copy_slice(to_append, batch[:])
+				// Append the copy
+				append(&batches, to_append)
 				clear(&batch)
 			}
 			append(&batch, quad)
@@ -266,8 +270,6 @@ main :: proc() {
 	gl_init()
 	defer gl_deinit()
 
-	test_texture := load_texture("assets/widget.png")
-
 	game_state: game.Game
 	game.init(root_arena, &game_state)
 
@@ -277,8 +279,7 @@ main :: proc() {
 		for name, idx in init.sprites {
 			path := strings.join({"assets/", name, ".png"}, "", frame_arena)
 			cpath := strings.clone_to_cstring(path, frame_arena)
-			fmt.printfln("Loaded %s as texture id: %d", name, idx)
-			GL.textures[idx] = load_texture(cpath)
+			GL.sprite_textures[idx] = load_texture(cpath)
 		}
 	}
 
@@ -307,7 +308,8 @@ main :: proc() {
 		for batch in batches {
 			// "Interpret" draw commands
 			sprite_id := batch[0].sprite
-			draw_call(batch, GL.textures[sprite_id])
+			texture := GL.sprite_textures[sprite_id]
+			draw_call(batch, texture)
 		}
 
 		glfw.SwapBuffers(window)
@@ -380,7 +382,7 @@ out vec4 frag_color;
 uniform sampler2D u_texture;
 
 void main() {
-	frag_color = texture(u_texture, v_uv); //v_col;
+	frag_color = texture(u_texture, v_uv) * v_col;
 }
 `
 
@@ -431,3 +433,4 @@ create_program :: proc(vertex_source, fragment_source: cstring) -> u32 {
 
 	return program
 }
+

@@ -55,7 +55,7 @@ init :: proc(alloc: mem.Allocator, game: ^Game) {
 		mem.arena_init(&game.long_lived_arena, bytes)
 	}
 
-	sprites: []string = {"widget"}
+	sprites: []string = {"quad", "widget"}
 
 	game.sprite_names = make_map(map[string]SpriteId)
 	for sprite, idx in sprites {
@@ -92,5 +92,8 @@ update_and_render :: proc(game: ^Game) -> []Quad {
 		Quad{bounds = rect_make(40, 40, 200, 200), color = WHITE, sprite = sprite},
 	)
 
+	append(&draw_commands, Quad{bounds = rect_make(100, 20, 50, 100), color = WHITE})
+
 	return draw_commands[:]
 }
+
