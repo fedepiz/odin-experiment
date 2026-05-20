@@ -327,13 +327,13 @@ main :: proc() {
 			append(&GL.sprite_textures, texture)
 
 			sprites := make_dynamic_array_len_cap(
-				[dynamic]game.AssetDef,
+				[dynamic]game.Asset_Def,
 				0,
 				len(asset_reqs.sprites),
 				frame_arena,
 			)
 
-			append(&sprites, game.AssetDef{name = name, id = u32(id)})
+			append(&sprites, game.Asset_Def{name = name, id = u32(id)})
 
 			assets.sprites = sprites[:]
 		}
@@ -345,13 +345,13 @@ main :: proc() {
 			append(&GL.fonts, font)
 
 			fonts := make_dynamic_array_len_cap(
-				[dynamic]game.AssetDef,
+				[dynamic]game.Asset_Def,
 				0,
 				len(asset_reqs.fonts),
 				frame_arena,
 			)
 
-			append(&fonts, game.AssetDef{name = name, id = u32(id)})
+			append(&fonts, game.Asset_Def{name = name, id = u32(id)})
 			assets.fonts = fonts[:]
 		}
 
@@ -616,3 +616,4 @@ text_to_batch :: proc(
 
 	return batch
 }
+

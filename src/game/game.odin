@@ -44,19 +44,20 @@ RED: Color = {1, 0, 0, 1}
 GREEN: Color = {0, 1, 0, 1}
 BLUE: Color = {0, 0, 1, 1}
 
-
 Game :: struct {
 	long_lived_arena: mem.Arena,
-	sprite_names:     map[string]AssetId,
-	font_names:       map[string]AssetId,
+	sprite_names:     map[string]Asset_Id,
+	font_names:       map[string]Asset_Id,
 }
 
-RectGradient :: [4]Color
+Rect_Gradient :: [4]Color
 
 rect_gradient_shaded :: proc(
 	base: Color,
-	relief, light_strength, dark_strength: f32,
-) -> RectGradient {
+	relief: f32 = 1.0,
+	light_strength: f32 = 0.45,
+	dark_strength: f32 = 0.55,
+) -> Rect_Gradient {
 	if relief == 0 {return base}
 
 	amount := clamp(relief < 0 ? -relief : relief, 0, 1)
@@ -76,28 +77,28 @@ rect_gradient_shaded :: proc(
 
 Drawable :: struct {
 	bounds:       Rect,
-	color:        RectGradient,
-	sprite:       AssetId,
+	color:        Rect_Gradient,
+	sprite:       Asset_Id,
 	text:         string,
-	font:         AssetId,
+	font:         Asset_Id,
 	pixel_height: int,
 }
 
-AssetsRequest :: struct {
+Assets_Request :: struct {
 	sprites: []string,
 	fonts:   []string,
 }
 
-AssetId :: u32
+Asset_Id :: u32
 
-AssetDef :: struct {
+Asset_Def :: struct {
 	name: string,
-	id:   AssetId,
+	id:   Asset_Id,
 }
 
 Assets :: struct {
-	sprites: []AssetDef,
-	fonts:   []AssetDef,
+	sprites: []Asset_Def,
+	fonts:   []Asset_Def,
 }
 
 // Prepare the game struct, preparing the various allocators etc
@@ -106,19 +107,19 @@ init :: proc(alloc: mem.Allocator, game: ^Game) {
 	mem.arena_init(&game.long_lived_arena, bytes)
 	long_lived_alloc := mem.arena_allocator(&game.long_lived_arena)
 	// Initialize the sprite map
-	game.sprite_names = make_map(map[string]AssetId, long_lived_alloc)
-	game.font_names = make_map(map[string]AssetId, long_lived_alloc)
+	game.sprite_names = make_map(map[string]Asset_Id, long_lived_alloc)
+	game.font_names = make_map(map[string]Asset_Id, long_lived_alloc)
 }
 
 // Asks the game what assets it may need
-asset_request :: proc(alloc: mem.Allocator) -> AssetsRequest {
+asset_request :: proc(alloc: mem.Allocator) -> Assets_Request {
 	sprites := make_dynamic_array([dynamic]string, alloc)
 	fonts := make_dynamic_array([dynamic]string, alloc)
 
 	append(&sprites, "quad", "widget")
 	append(&fonts, "default")
 
-	return AssetsRequest{sprites = sprites[:], fonts = fonts[:]}
+	return Assets_Request{sprites = sprites[:], fonts = fonts[:]}
 }
 
 // Provide the assets to the game and start in full
@@ -155,5 +156,42 @@ update_and_render :: proc(arena: mem.Allocator, game: ^Game) -> []Drawable {
 
 	append(&draw_commands, Drawable{bounds = rect_make(100, 20, 50, 100), color = WHITE})
 
+	{
+		ui_begin()
+
+		{
+			ui_box_begin()
+			ui_box_set_layout(Axis.Vertical)
+
+			{
+				ui_box_begin()
+				ui_box_pixel_size({80, 40})
+				ui_box_set_fill(rect_gradient_shaded(GREEN))
+				ui_box_end()
+			}
+
+			{
+				ui_box_begin()
+				ui_box_pixel_size({0, 20})
+				ui_box_end()
+			}
+
+			{
+				ui_box_begin()
+				ui_box_pixel_size({80, 40})
+				ui_box_set_fill(rect_gradient_shaded(RED))
+				ui_box_end()
+			}
+
+			ui_box_end()
+		}
+
+		commands := ui_end()
+		for command in commands {
+			append(&draw_commands, command)
+		}
+	}
+
 	return draw_commands[:]
 }
+
