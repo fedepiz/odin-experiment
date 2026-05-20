@@ -29,6 +29,15 @@ color_raw :: proc(color: Color) -> [4]f32 {
 	return cast([4]f32)color
 }
 
+color_mix :: proc(c1: Color, c2: Color, t: f32) -> Color {
+	t := clamp(t, 0, 1)
+	// Lerp every colour
+	result := c1 + (c2 - c1) * t
+	// But carry the alpha of the source
+	result.a = c1.a
+	return result
+}
+
 WHITE: Color = {1, 1, 1, 1}
 BLACK: Color = {0, 0, 0, 1}
 RED: Color = {1, 0, 0, 1}
@@ -43,9 +52,28 @@ Game :: struct {
 	sprite_names:     map[string]SpriteId,
 }
 
+RectGradient :: [4]Color
+
+rect_gradient_shaded :: proc(
+	base: Color,
+	relief, light_strength, dark_strength: f32,
+) -> RectGradient {
+	out := base
+	if relief == 0 {return out}
+
+	amount := clamp(relief < 0 ? -relief : relief, 0, 1)
+	light_amount := light_strength * amount
+	dark_amount := dark_strength * amount
+	light := color_mix(base, WHITE, light_amount)
+	soft_light := color_mix(base, WHITE, light_amount * 0.6)
+	dark := color_mix(base, BLACK, dark_amount)
+	soft_dark := color_mix(base, BLACK, dark_amount * 0.6)
+	return out
+}
+
 Quad :: struct {
 	bounds: Rect,
-	color:  Color,
+	color:  RectGradient,
 	sprite: SpriteId,
 }
 
@@ -90,6 +118,14 @@ update_and_render :: proc(game: ^Game) -> []Quad {
 	append(
 		&draw_commands,
 		Quad{bounds = rect_make(40, 40, 200, 200), color = WHITE, sprite = sprite},
+	)
+
+	append(
+		&draw_commands,
+		Quad {
+			bounds = rect_make(200, 200, 50, 100),
+			color = rect_gradient_shaded(RED, 0.5, 0.45, 0.55),
+		},
 	)
 
 	append(&draw_commands, Quad{bounds = rect_make(100, 20, 50, 100), color = WHITE})

@@ -104,7 +104,6 @@ draw_call :: proc(quads: []game.Quad, texture: Texture) {
 		if GL.num_vertices + 4 >= len(GL.vertices) || GL.num_indices + 6 >= len(GL.indices) do continue
 
 		pos := game.rect_corners(quad.bounds)
-		fill := game.color_raw(quad.color)
 
 		pos_to_ndc :: proc(pos: [2]f32) -> [2]f32 {
 			return (pos / {800, 600} * 2 - 1) * {1, -1}
@@ -116,7 +115,7 @@ draw_call :: proc(quads: []game.Quad, texture: Texture) {
 			GL.vertices[GL.num_vertices + i] = Vertex {
 				pos   = pos_to_ndc(pos[i]),
 				uv    = uvs[i],
-				color = fill,
+				color = game.color_raw(quad.color[i]),
 			}
 		}
 
@@ -203,8 +202,8 @@ batch_quads :: proc(alloc: mem.Allocator, quads: []game.Quad) -> [][]game.Quad {
 		batch := make_dynamic_array_len_cap([dynamic]game.Quad, 0, len(quads), alloc)
 		// Alaways put the first thing in the batch
 		append(&batch, quads[0])
-		for quad, idx in quads {
-			prev_quad := batch[idx]
+		for quad in quads {
+			prev_quad := batch[len(batch) - 1]
 			// If the quads are incompatible, start a new batch
 			if !quad_is_compatible(quad, prev_quad) {
 				// Copy the batch
