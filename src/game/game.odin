@@ -58,8 +58,7 @@ rect_gradient_shaded :: proc(
 	base: Color,
 	relief, light_strength, dark_strength: f32,
 ) -> RectGradient {
-	out := base
-	if relief == 0 {return out}
+	if relief == 0 {return base}
 
 	amount := clamp(relief < 0 ? -relief : relief, 0, 1)
 	light_amount := light_strength * amount
@@ -68,7 +67,12 @@ rect_gradient_shaded :: proc(
 	soft_light := color_mix(base, WHITE, light_amount * 0.6)
 	dark := color_mix(base, BLACK, dark_amount)
 	soft_dark := color_mix(base, BLACK, dark_amount * 0.6)
-	return out
+
+	if relief < 0 {
+		return {dark, soft_dark, light, soft_light}
+	} else {
+		return {light, soft_light, dark, soft_dark}
+	}
 }
 
 Quad :: struct {
@@ -124,7 +128,7 @@ update_and_render :: proc(game: ^Game) -> []Quad {
 		&draw_commands,
 		Quad {
 			bounds = rect_make(200, 200, 50, 100),
-			color = rect_gradient_shaded(RED, 0.5, 0.45, 0.55),
+			color = rect_gradient_shaded(RED, 1.0, 0.45, 0.55),
 		},
 	)
 
@@ -132,4 +136,3 @@ update_and_render :: proc(game: ^Game) -> []Quad {
 
 	return draw_commands[:]
 }
-

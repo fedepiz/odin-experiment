@@ -2,8 +2,10 @@ package main
 
 import "core:fmt"
 import "core:mem"
+import "core:os"
 import "core:strings"
 import "vendor:stb/image"
+import stbtt "vendor:stb/truetype"
 
 import gl "vendor:OpenGL"
 import "vendor:glfw"
@@ -18,22 +20,22 @@ PLATFORM: struct {
 	mouse_button_down_prev: [glfw.MOUSE_BUTTON_LAST]bool,
 }
 
-
 Vertex :: struct {
-	pos:   [2]f32,
+	xy:    [2]f32,
 	uv:    [2]f32,
 	color: [4]f32,
 }
+
+VERTICES_MAX :: 1024
+INDICES_MAX :: 1024
 
 GL: struct {
 	program:         u32,
 	vao:             u32,
 	vbo:             u32,
 	ebo:             u32,
-	vertices:        [1024]Vertex,
-	num_vertices:    int,
-	indices:         [1024]u32,
-	num_indices:     int,
+	vertices:        [dynamic; VERTICES_MAX]Vertex,
+	indices:         [dynamic; INDICES_MAX]u32,
 	sprite_textures: [1024]Texture,
 }
 
@@ -60,7 +62,7 @@ gl_init :: proc() {
 			gl.FLOAT,
 			false, // no normalisation
 			size_of(Vertex), // stride
-			offset_of(Vertex, pos), // offset
+			offset_of(Vertex, xy), // offset
 		)
 
 		// layout (location = 1) vec2 a_uv
@@ -94,39 +96,44 @@ gl_deinit :: proc() {
 	gl.DeleteBuffers(1, &GL.ebo)
 }
 
-draw_call :: proc(quads: []game.Quad, texture: Texture) {
+
+Element :: struct {
+	xy:    [4][2]f32,
+	uv:    [4][2]f32,
+	color: [4][4]f32,
+}
+
+Batch :: struct {
+	texture:  Texture,
+	elements: []Element,
+}
+
+pos_to_ndc :: proc(pos: [2]f32) -> [2]f32 {
+	return (pos / {800, 600} * 2 - 1) * {1, -1}
+}
+
+draw_call :: proc(batch: Batch) {
 	// Reset buffer states
-	GL.num_indices = 0
-	GL.num_vertices = 0
+	clear(&GL.vertices)
+	clear(&GL.indices)
 
-	for quad in quads {
+	for elem in batch.elements {
 		// Skip if buffers are full
-		if GL.num_vertices + 4 >= len(GL.vertices) || GL.num_indices + 6 >= len(GL.indices) do continue
-
-		pos := game.rect_corners(quad.bounds)
-
-		pos_to_ndc :: proc(pos: [2]f32) -> [2]f32 {
-			return (pos / {800, 600} * 2 - 1) * {1, -1}
-		}
-
-		uvs: [4][2]f32 = {{0, 0}, {1, 0}, {1, 1}, {0, 1}}
-
-		for i := 0; i < 4; i += 1 {
-			GL.vertices[GL.num_vertices + i] = Vertex {
-				pos   = pos_to_ndc(pos[i]),
-				uv    = uvs[i],
-				color = game.color_raw(quad.color[i]),
-			}
-		}
+		if len(GL.vertices) + 4 >= VERTICES_MAX || len(GL.indices) + 6 >= INDICES_MAX do continue
 
 		index_pattern: [6]int = {0, 1, 2, 2, 3, 0}
 		for i := 0; i < len(index_pattern); i += 1 {
-			GL.indices[GL.num_indices + i] = u32(GL.num_vertices + index_pattern[i])
+			append(&GL.indices, u32(len(GL.vertices) + index_pattern[i]))
 		}
 
-		GL.num_vertices += 4
-		GL.num_indices += 6
-
+		for i := 0; i < 4; i += 1 {
+			vertex := Vertex {
+				xy    = pos_to_ndc(elem.xy[i]),
+				uv    = elem.uv[i],
+				color = game.color_raw(elem.color[i]),
+			}
+			append(&GL.vertices, vertex)
+		}
 	}
 
 	gl.Enable(gl.BLEND)
@@ -138,32 +145,31 @@ draw_call :: proc(quads: []game.Quad, texture: Texture) {
 
 	gl.BufferData(
 		gl.ARRAY_BUFFER,
-		size_of(Vertex) * GL.num_vertices,
-		&GL.vertices[0],
+		size_of(Vertex) * len(GL.vertices),
+		raw_data(GL.vertices[:]),
 		gl.DYNAMIC_DRAW,
 	)
 
 	gl.BufferData(
 		gl.ELEMENT_ARRAY_BUFFER,
-		size_of(u32) * GL.num_indices,
-		&GL.indices[0],
+		size_of(u32) * len(GL.indices),
+		raw_data(GL.indices[:]),
 		gl.DYNAMIC_DRAW,
 	)
 
 
 	gl.ActiveTexture(gl.TEXTURE0)
-	gl.BindTexture(gl.TEXTURE_2D, texture)
+	gl.BindTexture(gl.TEXTURE_2D, batch.texture)
 
 	u_texture := gl.GetUniformLocation(GL.program, "u_texture")
 	gl.Uniform1i(u_texture, 0)
 
-	gl.DrawElements(gl.TRIANGLES, i32(GL.num_indices), gl.UNSIGNED_INT, nil)
+	gl.DrawElements(gl.TRIANGLES, i32(len(GL.indices)), gl.UNSIGNED_INT, nil)
 }
-
 
 Texture :: u32
 
-load_texture :: proc(path: cstring) -> Texture {
+load_texture_from_file :: proc(path: cstring) -> Texture {
 	w, h, channels: i32
 	pixels := image.load(path, &w, &h, &channels, 4)
 	if pixels == nil {
@@ -171,6 +177,10 @@ load_texture :: proc(path: cstring) -> Texture {
 	}
 	defer image.image_free(pixels)
 
+	return load_texture_from_pixels(pixels, w, h)
+}
+
+load_texture_from_pixels :: proc(pixels: [^]byte, w: i32, h: i32) -> Texture {
 	texture: u32
 	target :: gl.TEXTURE_2D
 
@@ -192,30 +202,48 @@ load_texture :: proc(path: cstring) -> Texture {
 	return texture
 }
 
-batch_quads :: proc(alloc: mem.Allocator, quads: []game.Quad) -> [][]game.Quad {
+batch_quads :: proc(alloc: mem.Allocator, quads: []game.Quad) -> []Batch {
 	quad_is_compatible :: proc(q1: game.Quad, q2: game.Quad) -> bool {
 		return q1.sprite == q2.sprite
 	}
 
-	batches := make([dynamic][]game.Quad, alloc)
+	batch_from_queue :: proc(alloc: mem.Allocator, queue: ^[dynamic]game.Quad) -> Batch {
+		assert(len(queue) > 0)
+		// Copy the batch
+		batch: Batch
+		batch.elements = make_slice([]Element, len(queue), alloc)
+		batch.texture = GL.sprite_textures[queue[0].sprite]
+
+		for i := 0; i < len(queue); i += 1 {
+			q := queue[i]
+			elem := Element {
+				xy    = game.rect_corners(q.bounds),
+				uv    = {{0, 0}, {1, 0}, {1, 1}, {0, 1}},
+				color = q.color,
+			}
+			batch.elements[i] = elem
+		}
+		clear(queue)
+		return batch
+	}
+
+	batches := make([dynamic]Batch, alloc)
 	if len(quads) > 0 {
-		batch := make_dynamic_array_len_cap([dynamic]game.Quad, 0, len(quads), alloc)
+		queue := make_dynamic_array_len_cap([dynamic]game.Quad, 0, len(quads), alloc)
 		// Alaways put the first thing in the batch
-		append(&batch, quads[0])
+		append(&queue, quads[0])
 		for quad in quads {
-			prev_quad := batch[len(batch) - 1]
+			prev_quad := queue[len(queue) - 1]
 			// If the quads are incompatible, start a new batch
 			if !quad_is_compatible(quad, prev_quad) {
 				// Copy the batch
-				to_append: []game.Quad = make_slice([]game.Quad, len(batch), alloc)
-				copy_slice(to_append, batch[:])
+				batch := batch_from_queue(alloc, &queue)
 				// Append the copy
-				append(&batches, to_append)
-				clear(&batch)
+				append(&batches, batch)
 			}
-			append(&batch, quad)
+			append(&queue, quad)
 		}
-		append(&batches, batch[:])
+		append(&batches, batch_from_queue(alloc, &queue))
 	}
 	return batches[:]
 }
@@ -272,13 +300,15 @@ main :: proc() {
 	game_state: game.Game
 	game.init(root_arena, &game_state)
 
+	font := load_font_from_file("assets/fonts/default.ttf")
+
 	{
 		init := game.prepare(frame_arena, &game_state)
 
 		for name, idx in init.sprites {
 			path := strings.join({"assets/", name, ".png"}, "", frame_arena)
 			cpath := strings.clone_to_cstring(path, frame_arena)
-			GL.sprite_textures[idx] = load_texture(cpath)
+			GL.sprite_textures[idx] = load_texture_from_file(cpath)
 		}
 	}
 
@@ -306,12 +336,14 @@ main :: proc() {
 
 		for batch in batches {
 			// "Interpret" draw commands
-			sprite_id := batch[0].sprite
-			texture := GL.sprite_textures[sprite_id]
-			draw_call(batch, texture)
+			draw_call(batch)
 		}
 
+		batch := text_to_batch(frame_arena, "Hello, World!", game.BLACK, &font, {100, 100}, 24)
+		draw_call(batch)
+
 		glfw.SwapBuffers(window)
+
 	}
 }
 
@@ -433,3 +465,105 @@ create_program :: proc(vertex_source, fragment_source: cstring) -> u32 {
 	return program
 }
 
+FontData :: struct {
+	cdata:        [96]stbtt.bakedchar,
+	texture:      Texture,
+	min_glyph:    i32,
+	max_glyph:    i32,
+	pixel_height: int,
+}
+
+grayscale_to_rgba :: proc(arena: mem.Allocator, grayscale: []byte) -> []byte {
+	img_rgba, _ := mem.alloc_bytes_non_zeroed(len(grayscale) * 4, allocator = arena)
+	for i := 0; i < len(grayscale); i += 1 {
+		img_rgba[i * 4] = 255
+		img_rgba[i * 4 + 1] = 255
+		img_rgba[i * 4 + 2] = 255
+		img_rgba[i * 4 + 3] = grayscale[i]
+	}
+	return img_rgba
+}
+
+load_font_from_file :: proc(path: string) -> FontData {
+	scratch := core.with_scratch(nil)
+	out: FontData
+
+	image_dim: i32 = 512
+	min_glyph: i32 = 32
+	pixel_height := 18
+
+	bytes, error := os.read_entire_file_from_path(path, scratch.arena)
+	if error != os.ERROR_NONE {
+		os.print_error(os.stdout, error, "File error")
+	} else {
+		bitmap_gray, _ := mem.alloc_bytes(int(image_dim * image_dim), allocator = scratch.arena)
+
+		num_glyphs: i32 = len(out.cdata)
+
+		stbtt.BakeFontBitmap(
+			raw_data(bytes),
+			0,
+			f32(pixel_height),
+			raw_data(bitmap_gray),
+			image_dim,
+			image_dim,
+			min_glyph,
+			num_glyphs,
+			raw_data(out.cdata[:]),
+		)
+
+		bitmap_rgba := grayscale_to_rgba(scratch.arena, bitmap_gray)
+		out.texture = load_texture_from_pixels(raw_data(bitmap_rgba), image_dim, image_dim)
+
+		out.min_glyph = min_glyph
+		out.max_glyph = min_glyph + num_glyphs
+		out.pixel_height = pixel_height
+	}
+	return out
+}
+
+text_to_batch :: proc(
+	alloc: mem.Allocator,
+	text: string,
+	color: game.Color,
+	font: ^FontData,
+	pos: [2]f32,
+	pixel_size: f32,
+) -> Batch {
+	scale: f32 = pixel_size / f32(font.pixel_height)
+	pen: [2]f32
+
+	elements := make_dynamic_array_len_cap([dynamic]Element, 0, len(text), alloc)
+
+	for char in text {
+		q: stbtt.aligned_quad
+		glyph := i32(char)
+
+		if (glyph >= font.min_glyph && glyph < font.max_glyph) {
+			glyph -= font.min_glyph
+		} else {
+			glyph = 0
+		}
+
+		stbtt.GetBakedQuad(raw_data(font.cdata[:]), 512, 512, glyph, &pen.x, &pen.y, &q, true)
+
+		element := Element {
+			xy    = {
+				{pos.x + q.x0 * scale, pos.y + q.y0 * scale},
+				{pos.x + q.x1 * scale, pos.y + q.y0 * scale},
+				{pos.x + q.x1 * scale, pos.y + q.y1 * scale},
+				{pos.x + q.x0 * scale, pos.y + q.y1 * scale},
+			},
+			uv    = {{q.s0, q.t0}, {q.s1, q.t0}, {q.s1, q.t1}, {q.s0, q.t1}},
+			color = color,
+		}
+		append(&elements, element)
+	}
+
+	batch: Batch = {
+		elements = elements[:],
+		texture  = font.texture,
+	}
+
+	return batch
+}

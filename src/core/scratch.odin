@@ -59,3 +59,8 @@ get_scratch :: proc(conflicts: []mem.Allocator) -> ArenaTemp {
 release_scratch :: proc(arena_temp: ArenaTemp) {
 	mem.end_arena_temp_memory(arena_temp.pos)
 }
+
+@(deferred_out = release_scratch)
+with_scratch :: proc(conflicts: []mem.Allocator) -> ArenaTemp {
+	return get_scratch(nil)
+}
