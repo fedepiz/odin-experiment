@@ -104,6 +104,64 @@ Element :: struct {
 	color: [4][4]f32,
 }
 
+DrawCommand :: struct {
+	texture: Texture,
+	element: Element,
+}
+
+translate_draw_commands :: proc(alloc: mem.Allocator, commands: []game.Drawable) -> []DrawCommand {
+	out := make_dynamic_array_len_cap(
+		[dynamic]DrawCommand,
+		0,
+		2 * len(commands),
+		allocator = alloc,
+	)
+	for command in commands {
+		if len(command.text) == 0 {
+			elem := Element {
+				xy    = game.rect_corners(command.bounds),
+				uv    = {{0, 0}, {1, 0}, {1, 1}, {0, 1}},
+				color = command.color,
+			}
+			texture := GL.sprite_textures[command.sprite]
+			append(&out, DrawCommand{element = elem, texture = texture})
+		} else {
+			assert(false)
+		}
+	}
+	return out[:]
+}
+
+batch_draw_commands :: proc(alloc: mem.Allocator, commands: []DrawCommand) -> []Batch {
+	// Copy over the elements
+	elements := make_slice([]Element, len(commands), allocator = alloc)
+	for i in 0 ..< len(commands) {
+		elements[i] = commands[i].element
+	}
+
+	// Prepare the batches
+	batches: [dynamic]Batch = make_dynamic_array([dynamic]Batch, allocator = alloc)
+	batch: Batch
+	start_idx := 0
+	for idx := 0; idx < len(commands); idx += 1 {
+		command := commands[idx]
+
+		end_batch := idx == len(commands) - 1 || command.texture != commands[idx + 1].texture
+		if end_batch {
+			// add all draw commands from start index to here
+			end_idx := idx + 1
+			batch.elements = elements[start_idx:end_idx]
+			batch.texture = commands[start_idx].texture
+			append(&batches, batch)
+			batch = Batch{}
+			start_idx = end_idx
+		}
+	}
+
+	return batches[:]
+}
+
+
 Batch :: struct {
 	texture:  Texture,
 	elements: []Element,
@@ -201,52 +259,6 @@ load_texture_from_pixels :: proc(pixels: [^]byte, w: i32, h: i32) -> Texture {
 	gl.BindTexture(target, 0)
 
 	return texture
-}
-
-batch_quads :: proc(alloc: mem.Allocator, quads: []game.Quad) -> []Batch {
-	quad_is_compatible :: proc(q1: game.Quad, q2: game.Quad) -> bool {
-		return q1.sprite == q2.sprite
-	}
-
-	batch_from_queue :: proc(alloc: mem.Allocator, queue: ^[dynamic]game.Quad) -> Batch {
-		assert(len(queue) > 0)
-		// Copy the batch
-		batch: Batch
-		batch.elements = make_slice([]Element, len(queue), alloc)
-		batch.texture = GL.sprite_textures[queue[0].sprite]
-
-		for i := 0; i < len(queue); i += 1 {
-			q := queue[i]
-			elem := Element {
-				xy    = game.rect_corners(q.bounds),
-				uv    = {{0, 0}, {1, 0}, {1, 1}, {0, 1}},
-				color = q.color,
-			}
-			batch.elements[i] = elem
-		}
-		clear(queue)
-		return batch
-	}
-
-	batches := make([dynamic]Batch, alloc)
-	if len(quads) > 0 {
-		queue := make_dynamic_array_len_cap([dynamic]game.Quad, 0, len(quads), alloc)
-		// Alaways put the first thing in the batch
-		append(&queue, quads[0])
-		for quad in quads {
-			prev_quad := queue[len(queue) - 1]
-			// If the quads are incompatible, start a new batch
-			if !quad_is_compatible(quad, prev_quad) {
-				// Copy the batch
-				batch := batch_from_queue(alloc, &queue)
-				// Append the copy
-				append(&batches, batch)
-			}
-			append(&queue, quad)
-		}
-		append(&batches, batch_from_queue(alloc, &queue))
-	}
-	return batches[:]
 }
 
 main :: proc() {
@@ -360,13 +372,16 @@ main :: proc() {
 		gl.ClearColor(0.1, 0.15, 0.25, 1.0)
 		gl.Clear(gl.COLOR_BUFFER_BIT)
 
-		quads := game.update_and_render(&game_state)
+		drawables := game.update_and_render(frame_arena, &game_state)
 
 		// end of frame
 		PLATFORM.key_down_prev = PLATFORM.key_down_now
 		PLATFORM.mouse_button_down_prev = PLATFORM.mouse_button_down_now
 
-		batches := batch_quads(frame_arena, quads)
+		batches := batch_draw_commands(
+			frame_arena,
+			translate_draw_commands(frame_arena, drawables),
+		)
 
 		for batch in batches {
 			// "Interpret" draw commands

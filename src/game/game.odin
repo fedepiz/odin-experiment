@@ -74,10 +74,13 @@ rect_gradient_shaded :: proc(
 	}
 }
 
-Quad :: struct {
-	bounds: Rect,
-	color:  RectGradient,
-	sprite: AssetId,
+Drawable :: struct {
+	bounds:       Rect,
+	color:        RectGradient,
+	sprite:       AssetId,
+	text:         string,
+	font:         AssetId,
+	pixel_height: int,
 }
 
 AssetsRequest :: struct {
@@ -128,29 +131,29 @@ start :: proc(game: ^Game, assets: Assets) {
 	}
 }
 
-update_and_render :: proc(game: ^Game) -> []Quad {
-	draw_commands := make([dynamic]Quad, 0, 1024)
+update_and_render :: proc(arena: mem.Allocator, game: ^Game) -> []Drawable {
+	draw_commands: [dynamic]Drawable = make([dynamic]Drawable, 0, 1024, allocator = arena)
 
 	sprite := game.sprite_names["widget"]
 
 	append(
 		&draw_commands,
-		Quad{bounds = rect_make(10, 20, 50, 100), color = GREEN, sprite = sprite},
+		Drawable{bounds = rect_make(10, 20, 50, 100), color = GREEN, sprite = sprite},
 	)
 	append(
 		&draw_commands,
-		Quad{bounds = rect_make(40, 40, 200, 200), color = WHITE, sprite = sprite},
+		Drawable{bounds = rect_make(40, 40, 200, 200), color = WHITE, sprite = sprite},
 	)
 
 	append(
 		&draw_commands,
-		Quad {
+		Drawable {
 			bounds = rect_make(200, 200, 50, 100),
 			color = rect_gradient_shaded(RED, 1.0, 0.45, 0.55),
 		},
 	)
 
-	append(&draw_commands, Quad{bounds = rect_make(100, 20, 50, 100), color = WHITE})
+	append(&draw_commands, Drawable{bounds = rect_make(100, 20, 50, 100), color = WHITE})
 
 	return draw_commands[:]
 }
