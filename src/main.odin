@@ -36,7 +36,8 @@ GL: struct {
 	ebo:             u32,
 	vertices:        [dynamic; VERTICES_MAX]Vertex,
 	indices:         [dynamic; INDICES_MAX]u32,
-	sprite_textures: [1024]Texture,
+	sprite_textures: [dynamic; 1024]Texture,
+	fonts:           [dynamic; 32]FontData,
 }
 
 gl_init :: proc() {
@@ -260,7 +261,7 @@ main :: proc() {
 
 	{
 		// Initialize arenas
-		mem.dynamic_arena_init(&arenas.root)
+		mem.dynamic_arena_init(&arenas.root, alignment = 64)
 		bytes, _ := mem.dynamic_arena_alloc_bytes(&arenas.root, 10_000_000)
 		mem.arena_init(&arenas.frame, bytes)
 	}
@@ -303,13 +304,46 @@ main :: proc() {
 	font := load_font_from_file("assets/fonts/default.ttf")
 
 	{
-		init := game.prepare(frame_arena, &game_state)
+		asset_reqs := game.asset_request(frame_arena)
+		assets: game.Assets
 
-		for name, idx in init.sprites {
+		for name in asset_reqs.sprites {
 			path := strings.join({"assets/", name, ".png"}, "", frame_arena)
 			cpath := strings.clone_to_cstring(path, frame_arena)
-			GL.sprite_textures[idx] = load_texture_from_file(cpath)
+			texture := load_texture_from_file(cpath)
+			id := len(GL.sprite_textures)
+			append(&GL.sprite_textures, texture)
+
+			sprites := make_dynamic_array_len_cap(
+				[dynamic]game.AssetDef,
+				0,
+				len(asset_reqs.sprites),
+				frame_arena,
+			)
+
+			append(&sprites, game.AssetDef{name = name, id = u32(id)})
+
+			assets.sprites = sprites[:]
 		}
+
+		for name in asset_reqs.fonts {
+			path := strings.join({"assets/fonts/", name, ".ttf"}, "", frame_arena)
+			font := load_font_from_file(path)
+			id := len(GL.fonts)
+			append(&GL.fonts, font)
+
+			fonts := make_dynamic_array_len_cap(
+				[dynamic]game.AssetDef,
+				0,
+				len(asset_reqs.fonts),
+				frame_arena,
+			)
+
+			append(&fonts, game.AssetDef{name = name, id = u32(id)})
+			assets.fonts = fonts[:]
+		}
+
+		game.start(&game_state, assets)
 	}
 
 	for !glfw.WindowShouldClose(window) {

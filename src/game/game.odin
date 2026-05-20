@@ -44,12 +44,11 @@ RED: Color = {1, 0, 0, 1}
 GREEN: Color = {0, 1, 0, 1}
 BLUE: Color = {0, 0, 1, 1}
 
-SpriteId :: int
-
 
 Game :: struct {
 	long_lived_arena: mem.Arena,
-	sprite_names:     map[string]SpriteId,
+	sprite_names:     map[string]AssetId,
+	font_names:       map[string]AssetId,
 }
 
 RectGradient :: [4]Color
@@ -78,36 +77,55 @@ rect_gradient_shaded :: proc(
 Quad :: struct {
 	bounds: Rect,
 	color:  RectGradient,
-	sprite: SpriteId,
+	sprite: AssetId,
 }
 
-init :: proc(alloc: mem.Allocator, game: ^Game) {
-	{
-		bytes, _ := mem.alloc_bytes_non_zeroed(10_000_000, allocator = alloc)
-		mem.arena_init(&game.long_lived_arena, bytes)
-	}
-
-	sprites: []string = {"quad", "widget"}
-
-	game.sprite_names = make_map(map[string]SpriteId)
-	for sprite, idx in sprites {
-		map_insert(&game.sprite_names, sprite, idx)
-	}
-}
-
-Initialize :: struct {
+AssetsRequest :: struct {
 	sprites: []string,
+	fonts:   []string,
 }
 
-prepare :: proc(arena: mem.Allocator, game: ^Game) -> Initialize {
-	out: Initialize
-	out.sprites = make_slice([]string, len(game.sprite_names), arena)
+AssetId :: u32
 
-	for name, idx in game.sprite_names {
-		out.sprites[idx] = name
+AssetDef :: struct {
+	name: string,
+	id:   AssetId,
+}
+
+Assets :: struct {
+	sprites: []AssetDef,
+	fonts:   []AssetDef,
+}
+
+// Prepare the game struct, preparing the various allocators etc
+init :: proc(alloc: mem.Allocator, game: ^Game) {
+	bytes, _ := mem.alloc_bytes_non_zeroed(10_000_000, allocator = alloc)
+	mem.arena_init(&game.long_lived_arena, bytes)
+	long_lived_alloc := mem.arena_allocator(&game.long_lived_arena)
+	// Initialize the sprite map
+	game.sprite_names = make_map(map[string]AssetId, long_lived_alloc)
+	game.font_names = make_map(map[string]AssetId, long_lived_alloc)
+}
+
+// Asks the game what assets it may need
+asset_request :: proc(alloc: mem.Allocator) -> AssetsRequest {
+	sprites := make_dynamic_array([dynamic]string, alloc)
+	fonts := make_dynamic_array([dynamic]string, alloc)
+
+	append(&sprites, "quad", "widget")
+	append(&fonts, "default")
+
+	return AssetsRequest{sprites = sprites[:], fonts = fonts[:]}
+}
+
+// Provide the assets to the game and start in full
+start :: proc(game: ^Game, assets: Assets) {
+	for sprite in assets.sprites {
+		map_insert(&game.sprite_names, sprite.name, sprite.id)
 	}
-
-	return out
+	for font in assets.fonts {
+		map_insert(&game.font_names, font.name, font.id)
+	}
 }
 
 update_and_render :: proc(game: ^Game) -> []Quad {
