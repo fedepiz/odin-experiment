@@ -22,14 +22,15 @@ PLATFORM: struct {
 }
 
 Vertex :: struct {
-	xy:           [2]f32,
-	uv:           [2]f32,
-	st:           [2]f32,
-	color:        [4]f32,
-	frag_size_px: [2]f32,
-	stroke:       [4]f32,
-	thickness:    f32,
-	radius:       f32,
+	xy:            [2]f32,
+	uv:            [2]f32,
+	st:            [2]f32,
+	color:         [4]f32,
+	frag_size_px:  [2]f32,
+	stroke:        [4]f32,
+	thickness:     f32,
+	radius:        f32,
+	tex_intensity: f32,
 }
 
 VERTICES_MAX :: 1024
@@ -138,7 +139,7 @@ gl_init :: proc() {
 			offset_of(Vertex, thickness), // offset
 		)
 		//
-		// layout (location = 6) vec4 a_col
+		// layout (location = 7) vec4 a_col
 		gl.EnableVertexAttribArray(7)
 		gl.VertexAttribPointer(
 			7, // location
@@ -147,6 +148,17 @@ gl_init :: proc() {
 			false, // no normalisation
 			size_of(Vertex), // stride
 			offset_of(Vertex, radius), // offset
+		)
+		//
+		// layout (location = 8) vec4 a_col
+		gl.EnableVertexAttribArray(8)
+		gl.VertexAttribPointer(
+			8, // location
+			1, // 4 floats (vec4)
+			gl.FLOAT,
+			false, // no normalisation
+			size_of(Vertex), // stride
+			offset_of(Vertex, tex_intensity), // offset
 		)
 	}
 }
@@ -160,13 +172,14 @@ gl_deinit :: proc() {
 
 
 Element :: struct {
-	xy:        [4][2]f32,
-	st:        [4][2]f32,
-	color:     [4][4]f32,
-	size:      [2]f32,
-	stroke:    [4][4]f32,
-	thickness: f32,
-	radius:    f32,
+	xy:            [4][2]f32,
+	st:            [4][2]f32,
+	color:         [4][4]f32,
+	size:          [2]f32,
+	stroke:        [4][4]f32,
+	thickness:     f32,
+	radius:        f32,
+	tex_intensity: f32,
 }
 
 DrawCommand :: struct {
@@ -233,13 +246,14 @@ translate_draw_commands :: proc(alloc: mem.Allocator, commands: []game.Drawable)
 			}
 
 			elem := Element {
-				xy        = game.rect_corners(draw.bounds),
-				st        = uv,
-				color     = draw.color,
-				size      = game.rect_size(draw.bounds),
-				stroke    = draw.stroke,
-				thickness = draw.thickness,
-				radius    = draw.radius,
+				xy            = game.rect_corners(draw.bounds),
+				st            = uv,
+				color         = draw.color,
+				size          = game.rect_size(draw.bounds),
+				stroke        = draw.stroke,
+				thickness     = draw.thickness,
+				radius        = draw.radius,
+				tex_intensity = draw.sprite_intensity,
 			}
 			append(&out, DrawCommand{element = elem, texture = texture})
 		}
@@ -284,15 +298,16 @@ translate_draw_commands :: proc(alloc: mem.Allocator, commands: []game.Drawable)
 
 
 				element := Element {
-					xy    = {
+					xy            = {
 						{pos.x + q.x0 * scale, pos.y + q.y0 * scale},
 						{pos.x + q.x1 * scale, pos.y + q.y0 * scale},
 						{pos.x + q.x1 * scale, pos.y + q.y1 * scale},
 						{pos.x + q.x0 * scale, pos.y + q.y1 * scale},
 					},
-					st    = {{q.s0, q.t0}, {q.s1, q.t0}, {q.s1, q.t1}, {q.s0, q.t1}},
-					color = draw.text.color,
-					size  = {q.x1 - q.x0, q.y1 - q.y0},
+					st            = {{q.s0, q.t0}, {q.s1, q.t0}, {q.s1, q.t1}, {q.s0, q.t1}},
+					color         = draw.text.color,
+					size          = {q.x1 - q.x0, q.y1 - q.y0},
+					tex_intensity = 1,
 				}
 				append(&out, DrawCommand{element = element, texture = font.texture})
 			}
@@ -361,14 +376,15 @@ draw_call :: proc(batch: Batch) {
 			xy := pos_to_ndc(elem.xy[i])
 
 			vertex := Vertex {
-				xy           = xy,
-				uv           = uv[i],
-				st           = elem.st[i],
-				color        = elem.color[i],
-				frag_size_px = elem.size,
-				stroke       = elem.stroke[i],
-				thickness    = elem.thickness,
-				radius       = elem.radius,
+				xy            = xy,
+				uv            = uv[i],
+				st            = elem.st[i],
+				color         = elem.color[i],
+				frag_size_px  = elem.size,
+				stroke        = elem.stroke[i],
+				thickness     = elem.thickness,
+				radius        = elem.radius,
+				tex_intensity = elem.tex_intensity,
 			}
 			append(&GL.vertices, vertex)
 		}
@@ -429,8 +445,8 @@ load_texture_from_pixels :: proc(pixels: [^]byte, w: i32, h: i32) -> Texture {
 	gl.BindTexture(target, texture.id)
 
 	// Wrapping
-	gl.TexParameteri(target, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-	gl.TexParameteri(target, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+	gl.TexParameteri(target, gl.TEXTURE_WRAP_S, gl.REPEAT)
+	gl.TexParameteri(target, gl.TEXTURE_WRAP_T, gl.REPEAT)
 
 	// Filtering
 	gl.TexParameteri(target, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
@@ -642,6 +658,7 @@ layout (location = 4) in vec2 a_frag_size_px;
 layout (location = 5) in vec4 a_stroke;
 layout (location = 6) in float a_thickness_px;
 layout (location = 7) in float a_radius_px;
+layout (location = 8) in float a_tex_intensity;
 
 out vec2 v_uv;
 out vec2 v_st;
@@ -650,6 +667,7 @@ out vec2 v_frag_size_px;
 out vec4 v_stroke;
 out float v_thickness_px;
 out float v_radius_px;
+out float v_tex_intensity;
 
 void main() {
 	gl_Position = vec4(a_xy, 0.0, 1.0);
@@ -660,6 +678,7 @@ void main() {
 	v_stroke = a_stroke;
 	v_thickness_px = a_thickness_px;
 	v_radius_px = a_radius_px;
+	v_tex_intensity = a_tex_intensity;
 }
 `
 
@@ -672,6 +691,7 @@ in vec2 v_frag_size_px;
 in vec4 v_stroke;
 in float v_thickness_px;
 in float v_radius_px;
+in float v_tex_intensity;
 
 out vec4 frag_color;
 
@@ -692,7 +712,8 @@ void main() {
 	float mask_inner = 1.0 - smoothstep(0.0, aa, sd + v_thickness_px);
 	float stroke = mask_outer - mask_inner;
 
-	vec4 fill_col = texture(u_texture, v_st) * v_col;
+	vec4 tex = texture(u_texture, v_st);
+	vec4 fill_col =  mix(v_col, tex * v_col, v_tex_intensity);
 	vec4 col = fill_col * mask_inner + v_stroke * stroke;
 
 	frag_color = col;

@@ -66,8 +66,15 @@ Ui_StyleVar :: enum {
 	WidgetTextSize,
 	WidgetBorderColor,
 	WidgetBorderThickness,
+	WidgetThinBorderThickness,
 	WidgetBorderRadius,
+	ToggleOnColor,
+	ToggleHoverColor,
 	PanelColor,
+	PanelBorderColor,
+	PanelBorderThickness,
+	PanelBorderRadius,
+	PanelBorderPad,
 }
 
 @(private = "file")
@@ -97,43 +104,59 @@ ui_style_var_type :: proc(var: Ui_StyleVar) -> Ui_StyleVarType {
 		return .Color
 	case .WidgetBorderThickness:
 		return .Number
+	case .WidgetThinBorderThickness:
+		return .Number
 	case .WidgetBorderRadius:
 		return .Number
+	case .ToggleOnColor:
+		return .Color
+	case .ToggleHoverColor:
+		return .Color
 	case .PanelColor:
 		return .Color
+	case .PanelBorderColor:
+		return .Color
+	case .PanelBorderThickness:
+		return .Number
+	case .PanelBorderRadius:
+		return .Number
+	case .PanelBorderPad:
+		return .Number
 	case:
 		assert(false)
 	}
 	return {}
 }
 
-Ui_StyleVarData :: union {
-	f32,
-	Color,
+Ui_StyleVarData :: struct {
+	num:   f32,
+	color: Color,
 }
 
 @(private = "file")
 Ui_Box :: struct {
-	key:          Ui_Key,
-	logical_size: [Axis]Logical_Size,
-	bounds:       Rect,
-	growth_axis:  [2]f32,
-	background:   Asset_Id,
-	fill:         Rect_Gradient,
+	key:                  Ui_Key,
+	logical_size:         [Axis]Logical_Size,
+	bounds:               Rect,
+	growth_axis:          [2]f32,
+	center_axis:          [2]f32,
+	background:           Asset_Id,
+	background_intensity: f32,
+	fill:                 Rect_Gradient,
 	// Border
-	stroke:       Rect_Gradient,
-	thickness:    f32,
-	radius:       f32,
+	stroke:               Rect_Gradient,
+	thickness:            f32,
+	radius:               f32,
 	// Text
-	text:         string,
-	font:         Asset_Id,
-	pixel_height: f32,
-	text_color:   Color,
+	text:                 string,
+	font:                 Asset_Id,
+	pixel_height:         f32,
+	text_color:           Color,
 	// Hierarchy
-	parent:       ^Ui_Box,
-	first_child:  ^Ui_Box,
-	last_child:   ^Ui_Box,
-	sibling:      ^Ui_Box,
+	parent:               ^Ui_Box,
+	first_child:          ^Ui_Box,
+	last_child:           ^Ui_Box,
+	sibling:              ^Ui_Box,
 }
 
 @(private = "file")
@@ -278,6 +301,7 @@ ui_end :: proc() -> []Drawable {
 			color = ui_box.fill,
 			sprite = ui_box.background,
 			sprite_mapping = .Wrap,
+			sprite_intensity = ui_box.background_intensity,
 			stroke = ui_box.stroke,
 			thickness = ui_box.thickness,
 			radius = ui_box.radius,
@@ -292,8 +316,11 @@ ui_end :: proc() -> []Drawable {
 
 		append(&UI.drawables, drawable)
 
+
 		for child := ui_box.first_child; child != nil; child = child.sibling {
-			layout_rec(child, cursor)
+			centering :=
+				(rect_size(ui_box.bounds) - rect_size(child.bounds)) / 2 * ui_box.center_axis
+			layout_rec(child, cursor + centering)
 			cursor += rect_size(child.bounds) * ui_box.growth_axis
 		}
 	}
@@ -352,9 +379,10 @@ ui_box_set_border :: proc(color: Rect_Gradient, thickness: f32, radius: f32) {
 
 }
 
-ui_box_set_background :: proc(background: Asset_Id) {
+ui_box_set_background :: proc(background: Asset_Id, intensity: f32) {
 	if UI.active != nil {
 		UI.active.background = background
+		UI.active.background_intensity = intensity
 	}
 }
 
@@ -374,18 +402,34 @@ ui_box_set_layout :: proc(maj_axis: Axis) {
 		UI.active.growth_axis[min_axis] = 0
 		UI.active.logical_size[maj_axis].kind = Logical_Size_Kind.SumOfChildren
 		UI.active.logical_size[min_axis].kind = Logical_Size_Kind.MaxOfChildren
+		UI.active.center_axis[maj_axis] = 0
+		UI.active.center_axis[min_axis] = 1
 	}
 }
 
-ui_set_style_var :: proc(var: Ui_StyleVar, value: Ui_StyleVarData) {
+
+ui_set_style_color :: proc(var: Ui_StyleVar, value: Color) {
 	typ := ui_style_var_type(var)
-	switch v in value {
-	case f32:
-		assert(typ == .Number)
-	case Color:
-		assert(typ == .Color)
+	switch (typ) {
+	case .Color:
+		UI.style_vars[var].color = value
+	case .Number:
+		fallthrough
+	case:
+		fmt.printfln("Writing a color value to ui var %v, that has type %v\n", var, typ)
 	}
-	UI.style_vars[var] = value
+}
+
+ui_set_style_number :: proc(var: Ui_StyleVar, value: f32) {
+	typ := ui_style_var_type(var)
+	switch (typ) {
+	case .Number:
+		UI.style_vars[var].num = value
+	case .Color:
+		fallthrough
+	case:
+		fmt.printfln("Writing a number value to ui var %v, that has type %v\n", var, typ)
+	}
 }
 
 ui_get_style_var :: proc(var: Ui_StyleVar) -> Ui_StyleVarData {
@@ -394,22 +438,69 @@ ui_get_style_var :: proc(var: Ui_StyleVar) -> Ui_StyleVarData {
 
 @(private = "file")
 ui_get_unit_size :: proc() -> [2]f32 {
-	return {ui_get_style_var(Ui_StyleVar.UnitW).(f32), ui_get_style_var(Ui_StyleVar.UnitH).(f32)}
+	return {ui_get_style_var(Ui_StyleVar.UnitW).num, ui_get_style_var(Ui_StyleVar.UnitH).num}
+}
+
+@(private = "file")
+ui_space_generic :: proc(x, y: f32) {
+	size := ui_get_unit_size() / 2
+	ui_box_begin()
+	ui_box_pixel_size(size * {x, y})
+	ui_box_end()
 }
 
 ui_vspace :: proc() {
-	ui_box_begin()
-	ui_box_pixel_size(ui_get_unit_size() * {0, 1})
-	ui_box_end()
+	ui_space_generic(0, 1)
 }
 
 ui_hspace :: proc() {
-	ui_box_begin()
-	ui_box_pixel_size(ui_get_unit_size() * {1, 0})
-	ui_box_end()
+	ui_space_generic(1, 0)
 }
 
-ui_button :: proc(text: string, width: f32, height: f32) -> bool {
+ui_heading :: proc(text: string, width: f32) {
+	ui_box_begin()
+	defer ui_box_end()
+
+	unit_size := ui_get_unit_size()
+
+	ui_box_set_text(text, BLACK, 32)
+	ui_box_pixel_size(unit_size * {width, 2})
+}
+
+ui_toggle :: proc(text: string, status: bool) -> bool {
+	status := status
+
+	ui_box_begin()
+	defer ui_box_end()
+
+	ui_box_pixel_size(ui_get_unit_size())
+
+	sig := ui_box_set_key_from_text(text)
+
+	color: Rect_Gradient
+	if status {
+		color = ui_get_style_var(Ui_StyleVar.ToggleOnColor).color
+	} else if sig.is_hovered {
+		color = ui_get_style_var(Ui_StyleVar.ToggleHoverColor).color
+	} else {
+		color = {}
+	}
+	ui_box_set_fill(color)
+
+	if sig.is_clicked {
+		status = !status
+	}
+
+	{
+		color := ui_get_style_var(.WidgetBorderColor).color
+		thickenss := ui_get_style_var(.WidgetThinBorderThickness).num
+		ui_box_set_border(color, thickenss, 0)
+	}
+
+	return status
+}
+
+ui_button :: proc(text: string, width: f32) -> bool {
 	ui_box_begin()
 	defer ui_box_end()
 
@@ -417,8 +508,8 @@ ui_button :: proc(text: string, width: f32, height: f32) -> bool {
 
 	sig := ui_box_set_key_from_text(text)
 
-	text_color := ui_get_style_var(.WidgetTextColor).(Color)
-	pixel_height := ui_get_style_var(.WidgetTextSize).(f32)
+	text_color := ui_get_style_var(.WidgetTextColor).color
+	pixel_height := ui_get_style_var(.WidgetTextSize).num
 
 	ui_box_set_text(text, text_color, pixel_height)
 
@@ -432,15 +523,15 @@ ui_button :: proc(text: string, width: f32, height: f32) -> bool {
 	} else {
 		color_var = Ui_StyleVar.WidgetBaseColor
 	}
-	color := ui_get_style_var(color_var).(Color)
+	color := ui_get_style_var(color_var).color
 
-	ui_box_pixel_size({width, height} * unit_size)
+	ui_box_pixel_size({width, 2} * unit_size)
 	ui_box_set_fill(rect_gradient_shaded(color, relief))
 
 	{
-		color := ui_get_style_var(.WidgetBorderColor).(Color)
-		thickness := ui_get_style_var(.WidgetBorderThickness).(f32)
-		radius := ui_get_style_var(.WidgetBorderRadius).(f32)
+		color := ui_get_style_var(.WidgetBorderColor).color
+		thickness := ui_get_style_var(.WidgetBorderThickness).num
+		radius := ui_get_style_var(.WidgetBorderRadius).num
 		ui_box_set_border(rect_gradient_shaded(color, relief), thickness, radius)
 	}
 
@@ -452,7 +543,29 @@ ui_panel :: proc(axis: Axis) {
 	ui_box_begin()
 	ui_box_set_layout(axis)
 
-	color := ui_get_style_var(Ui_StyleVar.PanelColor).(Color)
-	ui_box_set_fill(color)
+	{
+		color := ui_get_style_var(Ui_StyleVar.PanelColor).color
+		ui_box_set_fill(color)
+	}
+
+	{
+		color := ui_get_style_var(.PanelBorderColor).color
+		thickness := ui_get_style_var(.PanelBorderThickness).num
+		radius := ui_get_style_var(.PanelBorderRadius).num
+		ui_box_set_border(rect_gradient_shaded(color, 1), thickness, 0)
+	}
+}
+
+@(deferred_none = ui_box_end)
+ui_row :: proc() {
+	ui_box_begin()
+	ui_box_set_layout(Axis.Horizontal)
+
+}
+
+@(deferred_none = ui_box_end)
+ui_col :: proc() {
+	ui_box_begin()
+	ui_box_set_layout(Axis.Vertical)
 }
 

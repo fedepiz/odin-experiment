@@ -112,14 +112,15 @@ SpriteMapping :: enum {
 }
 
 Drawable :: struct {
-	bounds:         Rect,
-	color:          Rect_Gradient,
-	stroke:         Rect_Gradient,
-	thickness:      f32,
-	radius:         f32,
-	sprite:         Asset_Id,
-	sprite_mapping: SpriteMapping,
-	text:           DrawableText,
+	bounds:           Rect,
+	color:            Rect_Gradient,
+	stroke:           Rect_Gradient,
+	thickness:        f32,
+	radius:           f32,
+	sprite:           Asset_Id,
+	sprite_mapping:   SpriteMapping,
+	sprite_intensity: f32,
+	text:             DrawableText,
 }
 
 Assets_Request :: struct {
@@ -176,39 +177,72 @@ Platform_Input :: struct {
 	mouse_down:    bool,
 }
 
+show_ui := true
+
 update_and_render :: proc(arena: mem.Allocator, game: ^Game, input: Platform_Input) -> []Drawable {
 	draw_commands: [dynamic]Drawable = make([dynamic]Drawable, 0, 1024, allocator = arena)
 
 	{
 		base_color := color_rgba8(207, 185, 151, 255)
-		ui_set_style_var(.UnitW, 80)
-		ui_set_style_var(.UnitH, 40)
-		ui_set_style_var(.WidgetBaseColor, base_color)
-		ui_set_style_var(.WidgetHoverColor, BLUE)
-		ui_set_style_var(.WidgetHeldColor, RED)
-		ui_set_style_var(.WidgetTextColor, BLACK)
-		ui_set_style_var(.WidgetTextSize, 24)
-		ui_set_style_var(.WidgetBorderColor, color_mix(base_color, BLACK, 0.5))
-		ui_set_style_var(.WidgetBorderRadius, 10)
-		ui_set_style_var(.WidgetBorderThickness, 5)
-		ui_set_style_var(.PanelColor, WHITE)
+		// Basic
+		ui_set_style_number(.UnitW, 20)
+		ui_set_style_number(.UnitH, 20)
+		// Widget
+		ui_set_style_color(.WidgetBaseColor, base_color)
+		ui_set_style_color(.WidgetHoverColor, GREEN)
+		ui_set_style_color(.WidgetHeldColor, RED)
+		ui_set_style_color(.WidgetTextColor, BLACK)
+		ui_set_style_number(.WidgetTextSize, 26)
+		ui_set_style_color(.WidgetBorderColor, color_mix(base_color, BLACK, 0.5))
+		ui_set_style_number(.WidgetBorderRadius, 8)
+		ui_set_style_number(.WidgetBorderThickness, 5)
+		ui_set_style_number(.WidgetThinBorderThickness, 2)
+		ui_set_style_color(.ToggleOnColor, GREEN)
+		ui_set_style_color(.ToggleHoverColor, RED)
+		// Panels
+		ui_set_style_color(.PanelColor, base_color)
+		ui_set_style_color(.PanelBorderColor, color_mix(base_color, BLACK, 0.5))
+		ui_set_style_number(.PanelBorderRadius, 8)
+		ui_set_style_number(.PanelBorderThickness, 5)
 
 		sprite := game.sprite_names["widget"]
 		ui_begin(input)
 
-		{
+		if show_ui {
 			ui_panel(.Vertical)
-			ui_box_set_background(sprite)
+			ui_box_set_background(sprite, 0.2)
 
-			if ui_button("Hello", 2, 1) {
-				fmt.println("Hello")
+			ui_vspace()
+
+			{
+				ui_row()
+				ui_heading("This is a heading!", 16)
+				show_ui = !ui_toggle("###CLOSE", false)
+				ui_hspace()
+			}
+
+
+			{
+				ui_row()
+				ui_hspace()
+				if ui_button("Hello", 6) {
+					fmt.println("Hello")
+				}
+				ui_hspace()
 			}
 
 			ui_vspace()
 
-			if ui_button("Goodbye", 2, 1) {
-				fmt.println("Goodbye")
+			{
+				ui_row()
+				ui_hspace()
+				if ui_button("Goodbye", 6) {
+					fmt.println("Goodbye")
+				}
+				ui_hspace()
 			}
+
+			ui_vspace()
 		}
 
 		commands := ui_end()
