@@ -18,6 +18,7 @@ PLATFORM: struct {
 	key_down_prev:          [glfw.KEY_LAST]bool,
 	mouse_button_down_now:  [glfw.MOUSE_BUTTON_LAST]bool,
 	mouse_button_down_prev: [glfw.MOUSE_BUTTON_LAST]bool,
+	mouse_pos:              [2]f32,
 }
 
 Vertex :: struct {
@@ -303,6 +304,7 @@ main :: proc() {
 	glfw.MakeContextCurrent(window)
 	glfw.SetKeyCallback(window, key_callback)
 	glfw.SetMouseButtonCallback(window, mouse_callback)
+	glfw.SetCursorPosCallback(window, cursor_pos_callback)
 
 	gl.load_up_to(3, 3, glfw.gl_set_proc_address)
 	gl.Viewport(0, 0, 800, 600)
@@ -372,7 +374,13 @@ main :: proc() {
 		gl.ClearColor(0.1, 0.15, 0.25, 1.0)
 		gl.Clear(gl.COLOR_BUFFER_BIT)
 
-		drawables := game.update_and_render(frame_arena, &game_state)
+		input: game.Platform_Input = {
+			mouse_pos     = PLATFORM.mouse_pos,
+			mouse_clicked = is_button_pressed(glfw.MOUSE_BUTTON_LEFT),
+			mouse_down    = is_button_down(glfw.MOUSE_BUTTON_LEFT),
+		}
+
+		drawables := game.update_and_render(frame_arena, &game_state, input)
 
 		// end of frame
 		PLATFORM.key_down_prev = PLATFORM.key_down_now
@@ -418,6 +426,10 @@ mouse_callback :: proc "c" (window: glfw.WindowHandle, button, action, mods: i32
 	case:
 	}
 	PLATFORM.mouse_button_down_now[button] = value
+}
+
+cursor_pos_callback :: proc "c" (window: glfw.WindowHandle, x_pos, y_pos: f64) {
+	PLATFORM.mouse_pos = {f32(x_pos), f32(y_pos)}
 }
 
 is_key_down :: proc(key: i32) -> bool {
@@ -616,4 +628,3 @@ text_to_batch :: proc(
 
 	return batch
 }
-

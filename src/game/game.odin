@@ -1,5 +1,6 @@
 package game
 
+import "core:fmt"
 import "core:mem"
 V2 :: [2]f32
 
@@ -22,6 +23,17 @@ rect_corners :: proc(rect: Rect) -> [4][2]f32 {
 		{rect.x, rect.y + rect.h},
 	}
 }
+
+rect_contains_point :: proc(rect: Rect, point: V2) -> bool {
+	return(
+		point.x >= rect.x &&
+		point.y >= rect.y &&
+		point.x <= rect.x + rect.w &&
+		point.y <= rect.y + rect.h \
+	)
+}
+
+rect_size :: proc(rect: Rect) -> V2 {return {rect.w, rect.h}}
 
 Color :: [4]f32
 
@@ -132,7 +144,13 @@ start :: proc(game: ^Game, assets: Assets) {
 	}
 }
 
-update_and_render :: proc(arena: mem.Allocator, game: ^Game) -> []Drawable {
+Platform_Input :: struct {
+	mouse_pos:     V2,
+	mouse_clicked: bool,
+	mouse_down:    bool,
+}
+
+update_and_render :: proc(arena: mem.Allocator, game: ^Game, input: Platform_Input) -> []Drawable {
 	draw_commands: [dynamic]Drawable = make([dynamic]Drawable, 0, 1024, allocator = arena)
 
 	sprite := game.sprite_names["widget"]
@@ -157,33 +175,24 @@ update_and_render :: proc(arena: mem.Allocator, game: ^Game) -> []Drawable {
 	append(&draw_commands, Drawable{bounds = rect_make(100, 20, 50, 100), color = WHITE})
 
 	{
-		ui_begin()
+		ui_begin(input)
+		ui_base_color: Color = {207, 185, 151, 255}
+		ui_set_style_var(.WidgetBaseColor, ui_base_color)
+		ui_set_style_var(.WidgetHoverColor, BLUE)
+		ui_set_style_var(.WidgetHeldColor, RED)
 
 		{
-			ui_box_begin()
-			ui_box_set_layout(Axis.Vertical)
+			ui_panel(.Vertical)
 
-			{
-				ui_box_begin()
-				ui_box_pixel_size({80, 40})
-				ui_box_set_fill(rect_gradient_shaded(GREEN))
-				ui_box_end()
+			if ui_button(1) {
+				fmt.println("Hello")
 			}
 
-			{
-				ui_box_begin()
-				ui_box_pixel_size({0, 20})
-				ui_box_end()
-			}
+			ui_vspace()
 
-			{
-				ui_box_begin()
-				ui_box_pixel_size({80, 40})
-				ui_box_set_fill(rect_gradient_shaded(RED))
-				ui_box_end()
+			if ui_button(2) {
+				fmt.println("Goodbye")
 			}
-
-			ui_box_end()
 		}
 
 		commands := ui_end()
@@ -194,4 +203,3 @@ update_and_render :: proc(arena: mem.Allocator, game: ^Game) -> []Drawable {
 
 	return draw_commands[:]
 }
-

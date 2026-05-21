@@ -1,6 +1,7 @@
 package game
 
 import "core:fmt"
+import "core:mem"
 
 Logical_Size_Kind :: enum {
 	Pixels,
@@ -31,23 +32,78 @@ axis_flip :: proc(axis: Axis) -> Axis {
 }
 
 @(private = "file")
+Ui_Key :: u64
+
+@(private = "file")
+NumElements :: 1024
+
+@(private = "file")
 UI: struct {
-	boxes:     [dynamic; 1024]Ui_Box,
-	active:    ^Ui_Box,
-	drawables: [dynamic; 1024]Drawable,
+	boxes:      [dynamic; NumElements]Ui_Box,
+	active:     ^Ui_Box,
+	drawables:  [dynamic; NumElements]Drawable,
+	caches:     [2]map[Ui_Key]Ui_Cache,
+	tick_num:   u64,
+	global_sig: Ui_GlobalSignals,
+	style_vars: [Ui_StyleVar]Ui_StyleVarData,
+}
+
+@(private = "file")
+Ui_GlobalSignals :: struct {
+	hovered_key: Ui_Key,
+	clicked_key: Ui_Key,
+	held_key:    Ui_Key,
+}
+
+Ui_StyleVar :: enum {
+	WidgetBaseColor,
+	WidgetHoverColor,
+	WidgetHeldColor,
+}
+
+@(private = "file")
+Ui_StyleVarType :: enum {
+	Number,
+	Color,
+}
+
+@(private = "file")
+ui_style_var_type :: proc(var: Ui_StyleVar) -> Ui_StyleVarType {
+	switch (var) {
+	case .WidgetBaseColor:
+		return .Color
+	case .WidgetHeldColor:
+		return .Color
+	case .WidgetHoverColor:
+		return .Color
+	case:
+		assert(false)
+	}
+	return {}
+}
+
+Ui_StyleVarData :: union {
+	f32,
+	Color,
 }
 
 @(private = "file")
 Ui_Box :: struct {
-	key:           u64,
-	logical_size:  [Axis]Logical_Size,
-	computed_size: [2]f32,
-	growth_axis:   [2]f32,
-	fill:          Rect_Gradient,
-	parent:        ^Ui_Box,
-	first_child:   ^Ui_Box,
-	last_child:    ^Ui_Box,
-	sibling:       ^Ui_Box,
+	key:          Ui_Key,
+	logical_size: [Axis]Logical_Size,
+	bounds:       Rect,
+	growth_axis:  [2]f32,
+	fill:         Rect_Gradient,
+	parent:       ^Ui_Box,
+	first_child:  ^Ui_Box,
+	last_child:   ^Ui_Box,
+	sibling:      ^Ui_Box,
+}
+
+@(private = "file")
+Ui_Cache :: struct {
+	key:    Ui_Key,
+	bounds: Rect,
 }
 
 @(private = "file")
@@ -74,9 +130,56 @@ ui_box_end :: proc() {
 	UI.active = UI.active.parent
 }
 
-ui_begin :: proc() {
+ui_init :: proc(alloc: mem.Allocator) {
+	UI = {}
+	// Acquire memory for caches
+	UI.caches[0] = make(map[Ui_Key]Ui_Cache, NumElements, allocator = alloc)
+	UI.caches[1] = make(map[Ui_Key]Ui_Cache, NumElements, allocator = alloc)
+}
+
+@(private = "file")
+ui_get_old_cache :: proc() -> ^map[Ui_Key]Ui_Cache {
+	return &UI.caches[UI.tick_num % len(UI.caches)]
+
+}
+@(private = "file")
+ui_get_new_cache :: proc() -> ^map[Ui_Key]Ui_Cache {
+	return &UI.caches[(UI.tick_num + 1) % len(UI.caches)]
+}
+
+ui_begin :: proc(input: Platform_Input) {
+	old_cache := ui_get_old_cache()
+	new_cache := ui_get_new_cache()
+	UI.global_sig = {}
+
+	hovered: Ui_Key
+
+	for &ui_box in UI.boxes {
+		if ui_box.key == 0 do continue
+		cache: Ui_Cache
+		// Is the pointer over this item?
+		if rect_contains_point(ui_box.bounds, input.mouse_pos) {
+			hovered = ui_box.key
+		}
+		// Populate the cache
+		cache.key = ui_box.key
+		cache.bounds = ui_box.bounds
+		map_insert(new_cache, cache.key, cache)
+	}
+	// Get rid of the ui_box and old caches, we are done reading from there
 	clear(&UI.boxes)
+	clear(old_cache)
+
+	UI.global_sig.hovered_key = hovered
+	if input.mouse_clicked {
+		UI.global_sig.clicked_key = hovered
+	}
+	if input.mouse_down {
+		UI.global_sig.held_key = hovered
+	}
+
 	UI.active = nil
+	UI.tick_num += 1
 }
 
 ui_end :: proc() -> []Drawable {
@@ -96,16 +199,21 @@ ui_end :: proc() -> []Drawable {
 				computed_size += log_size.value
 			case .SumOfChildren:
 				for child := ui_box.first_child; child != nil; child = child.sibling {
-					computed_size += child.computed_size[axis]
+					computed_size += rect_size(child.bounds)[axis]
 				}
 			case .MaxOfChildren:
 				v: f32 = 0
 				for child := ui_box.first_child; child != nil; child = child.sibling {
-					v = max(v, child.computed_size[axis])
+					v = max(v, rect_size(child.bounds)[axis])
 				}
 				computed_size += v
 			}
-			ui_box.computed_size[axis] = computed_size
+			switch (axis) {
+			case .Horizontal:
+				ui_box.bounds.w = computed_size
+			case .Vertical:
+				ui_box.bounds.h = computed_size
+			}
 		}
 	}
 
@@ -125,15 +233,41 @@ ui_end :: proc() -> []Drawable {
 	// Layout recursive
 	layout_rec :: proc(ui_box: ^Ui_Box, cursor: V2) {
 		cursor := cursor
-		bounds := Rect{cursor.x, cursor.y, ui_box.computed_size[0], ui_box.computed_size[1]}
 
-		append(&UI.drawables, Drawable{bounds = bounds, color = ui_box.fill})
+		ui_box.bounds.x = cursor.x
+		ui_box.bounds.y = cursor.y
+
+		append(&UI.drawables, Drawable{bounds = ui_box.bounds, color = ui_box.fill})
 
 		for child := ui_box.first_child; child != nil; child = child.sibling {
 			layout_rec(child, cursor)
-			cursor += child.computed_size * ui_box.growth_axis
+			cursor += rect_size(child.bounds) * ui_box.growth_axis
 		}
 	}
+}
+
+Ui_Signal :: struct {
+	key:        Ui_Key,
+	is_hovered: bool,
+	is_clicked: bool,
+	is_held:    bool,
+}
+
+ui_box_set_key :: proc(key: u64) -> Ui_Signal {
+	signal: Ui_Signal
+	if UI.active != nil {
+		if UI.active.key != 0 {
+			fmt.println("WARNING: Reassining key for active widget")
+		}
+		UI.active.key = key
+		if key != 0 {
+			signal.key = key
+			signal.is_hovered = UI.global_sig.hovered_key == key
+			signal.is_clicked = UI.global_sig.clicked_key == key
+			signal.is_held = UI.global_sig.held_key == key
+		}
+	}
+	return signal
 }
 
 ui_box_pixel_size :: proc(size: V2) {
@@ -162,3 +296,57 @@ ui_box_set_layout :: proc(maj_axis: Axis) {
 	}
 }
 
+ui_set_style_var :: proc(var: Ui_StyleVar, value: Ui_StyleVarData) {
+	typ := ui_style_var_type(var)
+	switch v in value {
+	case f32:
+		assert(typ == .Number)
+	case Color:
+		assert(typ == .Color)
+	}
+	UI.style_vars[var] = value
+}
+
+ui_get_style_var :: proc(var: Ui_StyleVar) -> Ui_StyleVarData {
+	return UI.style_vars[var]
+}
+
+ui_vspace :: proc() {
+	ui_box_begin()
+	ui_box_pixel_size({0, 40})
+	ui_box_end()
+}
+
+ui_hspace :: proc() {
+	ui_box_begin()
+	ui_box_pixel_size({40, 0})
+	ui_box_end()
+}
+
+ui_button :: proc(key: u64) -> bool {
+	ui_box_begin()
+	defer ui_box_end()
+
+	sig := ui_box_set_key(key)
+
+	color_var: Ui_StyleVar
+	if sig.is_held {
+		color_var = Ui_StyleVar.WidgetHeldColor
+	} else if sig.is_hovered {
+		color_var = Ui_StyleVar.WidgetHoverColor
+	} else {
+		color_var = Ui_StyleVar.WidgetBaseColor
+	}
+	color := ui_get_style_var(color_var).(Color)
+
+	ui_box_pixel_size({80, 40})
+	ui_box_set_fill(rect_gradient_shaded(color))
+
+	return sig.is_clicked
+}
+
+@(deferred_none = ui_box_end)
+ui_panel :: proc(axis: Axis) {
+	ui_box_begin()
+	ui_box_set_layout(axis)
+}
