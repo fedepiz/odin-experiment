@@ -1,6 +1,7 @@
 package game
 
 import "core:fmt"
+import "core:hash"
 import "core:mem"
 
 Logical_Size_Kind :: enum {
@@ -56,9 +57,14 @@ Ui_GlobalSignals :: struct {
 }
 
 Ui_StyleVar :: enum {
+	UnitW,
+	UnitH,
 	WidgetBaseColor,
 	WidgetHoverColor,
 	WidgetHeldColor,
+	WidgetTextColor,
+	WidgetTextSize,
+	PanelColor,
 }
 
 @(private = "file")
@@ -70,11 +76,21 @@ Ui_StyleVarType :: enum {
 @(private = "file")
 ui_style_var_type :: proc(var: Ui_StyleVar) -> Ui_StyleVarType {
 	switch (var) {
+	case .UnitW:
+		return .Number
+	case .UnitH:
+		return .Number
 	case .WidgetBaseColor:
 		return .Color
 	case .WidgetHeldColor:
 		return .Color
 	case .WidgetHoverColor:
+		return .Color
+	case .WidgetTextColor:
+		return .Color
+	case .WidgetTextSize:
+		return .Number
+	case .PanelColor:
 		return .Color
 	case:
 		assert(false)
@@ -93,7 +109,14 @@ Ui_Box :: struct {
 	logical_size: [Axis]Logical_Size,
 	bounds:       Rect,
 	growth_axis:  [2]f32,
+	background:   Asset_Id,
 	fill:         Rect_Gradient,
+	// Text
+	text:         string,
+	font:         Asset_Id,
+	pixel_height: f32,
+	text_color:   Color,
+	// Hierarchy
 	parent:       ^Ui_Box,
 	first_child:  ^Ui_Box,
 	last_child:   ^Ui_Box,
@@ -237,7 +260,20 @@ ui_end :: proc() -> []Drawable {
 		ui_box.bounds.x = cursor.x
 		ui_box.bounds.y = cursor.y
 
-		append(&UI.drawables, Drawable{bounds = ui_box.bounds, color = ui_box.fill})
+		drawable := Drawable {
+			bounds = ui_box.bounds,
+			color = ui_box.fill,
+			sprite = ui_box.background,
+			text = {
+				content = ui_box.text,
+				pixel_height = ui_box.pixel_height,
+				color = ui_box.text_color,
+				font = ui_box.font,
+				pos = DrawTextPos.Center,
+			},
+		}
+
+		append(&UI.drawables, drawable)
 
 		for child := ui_box.first_child; child != nil; child = child.sibling {
 			layout_rec(child, cursor)
@@ -270,6 +306,11 @@ ui_box_set_key :: proc(key: u64) -> Ui_Signal {
 	return signal
 }
 
+ui_box_set_key_from_text :: proc(text: string) -> Ui_Signal {
+	key := hash.murmur64a(transmute([]byte)text)
+	return ui_box_set_key(key)
+}
+
 ui_box_pixel_size :: proc(size: V2) {
 	if UI.active != nil {
 		for axis in Axis {
@@ -277,12 +318,26 @@ ui_box_pixel_size :: proc(size: V2) {
 			UI.active.logical_size[axis].value = size[axis]
 		}
 	}
-
 }
 
 ui_box_set_fill :: proc(color: Rect_Gradient) {
 	if UI.active != nil {
 		UI.active.fill = color
+	}
+}
+
+ui_box_set_background :: proc(background: Asset_Id) {
+	if UI.active != nil {
+		UI.active.background = background
+	}
+}
+
+ui_box_set_text :: proc(text: string, color: Color, size: f32) {
+	if UI.active != nil {
+		UI.active.text = text
+		UI.active.text_color = color
+		UI.active.pixel_height = size
+		UI.active.font = 0
 	}
 }
 
@@ -311,23 +366,35 @@ ui_get_style_var :: proc(var: Ui_StyleVar) -> Ui_StyleVarData {
 	return UI.style_vars[var]
 }
 
+@(private = "file")
+ui_get_unit_size :: proc() -> [2]f32 {
+	return {ui_get_style_var(Ui_StyleVar.UnitW).(f32), ui_get_style_var(Ui_StyleVar.UnitH).(f32)}
+}
+
 ui_vspace :: proc() {
 	ui_box_begin()
-	ui_box_pixel_size({0, 40})
+	ui_box_pixel_size(ui_get_unit_size() * {0, 1})
 	ui_box_end()
 }
 
 ui_hspace :: proc() {
 	ui_box_begin()
-	ui_box_pixel_size({40, 0})
+	ui_box_pixel_size(ui_get_unit_size() * {1, 0})
 	ui_box_end()
 }
 
-ui_button :: proc(key: u64) -> bool {
+ui_button :: proc(text: string, width: f32, height: f32) -> bool {
 	ui_box_begin()
 	defer ui_box_end()
 
-	sig := ui_box_set_key(key)
+	unit_size := ui_get_unit_size()
+
+	sig := ui_box_set_key_from_text(text)
+
+	text_color := ui_get_style_var(.WidgetTextColor).(Color)
+	pixel_height := ui_get_style_var(.WidgetTextSize).(f32)
+
+	ui_box_set_text(text, text_color, pixel_height)
 
 	color_var: Ui_StyleVar
 	if sig.is_held {
@@ -339,7 +406,7 @@ ui_button :: proc(key: u64) -> bool {
 	}
 	color := ui_get_style_var(color_var).(Color)
 
-	ui_box_pixel_size({80, 40})
+	ui_box_pixel_size({width, height} * unit_size)
 	ui_box_set_fill(rect_gradient_shaded(color))
 
 	return sig.is_clicked
@@ -349,4 +416,7 @@ ui_button :: proc(key: u64) -> bool {
 ui_panel :: proc(axis: Axis) {
 	ui_box_begin()
 	ui_box_set_layout(axis)
+
+	color := ui_get_style_var(Ui_StyleVar.PanelColor).(Color)
+	ui_box_set_fill(color)
 }

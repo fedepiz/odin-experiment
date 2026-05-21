@@ -110,6 +110,43 @@ DrawCommand :: struct {
 	element: Element,
 }
 
+TextMeasurement :: struct {
+	size:     [2]f32,
+	baseline: f32,
+}
+
+measure_text :: proc(text: string, font: ^FontData, pixel_height: f32) -> TextMeasurement {
+	out: TextMeasurement
+	scale := pixel_height / f32(font.pixel_height)
+
+	x, y, min_x, min_y, max_x, max_y: f32
+
+	for char in text {
+		q: stbtt.aligned_quad
+		glyph := i32(char)
+
+		if (glyph >= font.min_glyph && glyph < font.max_glyph) {
+			glyph -= font.min_glyph
+		} else {
+			glyph = 0
+		}
+
+		stbtt.GetBakedQuad(raw_data(font.cdata[:]), 512, 512, glyph, &x, &y, &q, true)
+
+		min_x = min(min_x, q.x0)
+		min_y = min(min_y, q.y0)
+		max_x = max(max_x, q.x1)
+		max_y = max(max_y, q.y1)
+
+
+	}
+	out.size.x = (max_x - min_x) * scale
+	out.size.y = (max_y - min_y) * scale
+	out.baseline = -(min_y + max_y) * scale / 2
+
+	return out
+}
+
 translate_draw_commands :: proc(alloc: mem.Allocator, commands: []game.Drawable) -> []DrawCommand {
 	out := make_dynamic_array_len_cap(
 		[dynamic]DrawCommand,
@@ -117,18 +154,70 @@ translate_draw_commands :: proc(alloc: mem.Allocator, commands: []game.Drawable)
 		2 * len(commands),
 		allocator = alloc,
 	)
-	for command in commands {
-		if len(command.text) == 0 {
+	for draw in commands {
+		if draw.bounds.w > 0 && draw.bounds.h > 0 {
 			elem := Element {
-				xy    = game.rect_corners(command.bounds),
+				xy    = game.rect_corners(draw.bounds),
 				uv    = {{0, 0}, {1, 0}, {1, 1}, {0, 1}},
-				color = command.color,
+				color = draw.color,
 			}
-			texture := GL.sprite_textures[command.sprite]
+			texture := GL.sprite_textures[draw.sprite]
 			append(&out, DrawCommand{element = elem, texture = texture})
-		} else {
-			assert(false)
 		}
+
+		if len(draw.text.content) > 0 {
+			font := &GL.fonts[draw.text.font]
+			scale: f32 = f32(draw.text.pixel_height) / f32(font.pixel_height)
+			measure := measure_text(draw.text.content, font, draw.text.pixel_height)
+			pen: [2]f32
+
+			for char in draw.text.content {
+				q: stbtt.aligned_quad
+				glyph := i32(char)
+
+				if (glyph >= font.min_glyph && glyph < font.max_glyph) {
+					glyph -= font.min_glyph
+				} else {
+					glyph = 0
+				}
+
+				stbtt.GetBakedQuad(
+					raw_data(font.cdata[:]),
+					512,
+					512,
+					glyph,
+					&pen.x,
+					&pen.y,
+					&q,
+					true,
+				)
+
+				pos: [2]f32 = {draw.bounds.x, draw.bounds.y}
+
+				switch (draw.text.pos) {
+				case .Center:
+					pos.x += (draw.bounds.w - measure.size.x) / 2
+					pos.y += draw.bounds.h / 2 + measure.baseline
+				case .Left:
+					pos.y += draw.bounds.h / 2 + measure.baseline
+				case .Top_Left:
+				}
+
+
+				element := Element {
+					xy    = {
+						{pos.x + q.x0 * scale, pos.y + q.y0 * scale},
+						{pos.x + q.x1 * scale, pos.y + q.y0 * scale},
+						{pos.x + q.x1 * scale, pos.y + q.y1 * scale},
+						{pos.x + q.x0 * scale, pos.y + q.y1 * scale},
+					},
+					uv    = {{q.s0, q.t0}, {q.s1, q.t0}, {q.s1, q.t1}, {q.s0, q.t1}},
+					color = draw.text.color,
+				}
+				append(&out, DrawCommand{element = element, texture = font.texture})
+			}
+		}
+
 	}
 	return out[:]
 }
@@ -392,12 +481,12 @@ main :: proc() {
 		)
 
 		for batch in batches {
-			// "Interpret" draw commands
+			//"Interpret" draw commands
 			draw_call(batch)
 		}
 
-		batch := text_to_batch(frame_arena, "Hello, World!", game.BLACK, &font, {100, 100}, 24)
-		draw_call(batch)
+		// batch := text_to_batch(frame_arena, "Hello, World!", game.BLACK, &font, {100, 100}, 24)
+		// draw_call(batch)
 
 		glfw.SwapBuffers(window)
 
@@ -551,7 +640,7 @@ load_font_from_file :: proc(path: string) -> FontData {
 
 	image_dim: i32 = 512
 	min_glyph: i32 = 32
-	pixel_height := 18
+	pixel_height := 36
 
 	bytes, error := os.read_entire_file_from_path(path, scratch.arena)
 	if error != os.ERROR_NONE {
@@ -581,50 +670,4 @@ load_font_from_file :: proc(path: string) -> FontData {
 		out.pixel_height = pixel_height
 	}
 	return out
-}
-
-text_to_batch :: proc(
-	alloc: mem.Allocator,
-	text: string,
-	color: game.Color,
-	font: ^FontData,
-	pos: [2]f32,
-	pixel_size: f32,
-) -> Batch {
-	scale: f32 = pixel_size / f32(font.pixel_height)
-	pen: [2]f32
-
-	elements := make_dynamic_array_len_cap([dynamic]Element, 0, len(text), alloc)
-
-	for char in text {
-		q: stbtt.aligned_quad
-		glyph := i32(char)
-
-		if (glyph >= font.min_glyph && glyph < font.max_glyph) {
-			glyph -= font.min_glyph
-		} else {
-			glyph = 0
-		}
-
-		stbtt.GetBakedQuad(raw_data(font.cdata[:]), 512, 512, glyph, &pen.x, &pen.y, &q, true)
-
-		element := Element {
-			xy    = {
-				{pos.x + q.x0 * scale, pos.y + q.y0 * scale},
-				{pos.x + q.x1 * scale, pos.y + q.y0 * scale},
-				{pos.x + q.x1 * scale, pos.y + q.y1 * scale},
-				{pos.x + q.x0 * scale, pos.y + q.y1 * scale},
-			},
-			uv    = {{q.s0, q.t0}, {q.s1, q.t0}, {q.s1, q.t1}, {q.s0, q.t1}},
-			color = color,
-		}
-		append(&elements, element)
-	}
-
-	batch: Batch = {
-		elements = elements[:],
-		texture  = font.texture,
-	}
-
-	return batch
 }

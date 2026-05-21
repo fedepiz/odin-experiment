@@ -87,13 +87,25 @@ rect_gradient_shaded :: proc(
 	}
 }
 
-Drawable :: struct {
-	bounds:       Rect,
-	color:        Rect_Gradient,
-	sprite:       Asset_Id,
-	text:         string,
+DrawTextPos :: enum {
+	Center,
+	Left,
+	Top_Left,
+}
+
+DrawableText :: struct {
+	content:      string,
 	font:         Asset_Id,
-	pixel_height: int,
+	pixel_height: f32,
+	color:        Color,
+	pos:          DrawTextPos,
+}
+
+Drawable :: struct {
+	bounds: Rect,
+	color:  Rect_Gradient,
+	sprite: Asset_Id,
+	text:   DrawableText,
 }
 
 Assets_Request :: struct {
@@ -153,44 +165,50 @@ Platform_Input :: struct {
 update_and_render :: proc(arena: mem.Allocator, game: ^Game, input: Platform_Input) -> []Drawable {
 	draw_commands: [dynamic]Drawable = make([dynamic]Drawable, 0, 1024, allocator = arena)
 
-	sprite := game.sprite_names["widget"]
 
-	append(
-		&draw_commands,
-		Drawable{bounds = rect_make(10, 20, 50, 100), color = GREEN, sprite = sprite},
-	)
-	append(
-		&draw_commands,
-		Drawable{bounds = rect_make(40, 40, 200, 200), color = WHITE, sprite = sprite},
-	)
+	// append(
+	// 	&draw_commands,
+	// 	Drawable{bounds = rect_make(10, 20, 50, 100), color = GREEN, sprite = sprite},
+	// )
+	// append(
+	// 	&draw_commands,
+	// 	Drawable{bounds = rect_make(40, 40, 200, 200), color = WHITE, sprite = sprite},
+	// )
 
-	append(
-		&draw_commands,
-		Drawable {
-			bounds = rect_make(200, 200, 50, 100),
-			color = rect_gradient_shaded(RED, 1.0, 0.45, 0.55),
-		},
-	)
+	// append(
+	// 	&draw_commands,
+	// 	Drawable {
+	// 		bounds = rect_make(200, 200, 50, 100),
+	// 		color = rect_gradient_shaded(RED, 1.0, 0.45, 0.55),
+	// 	},
+	// )
 
-	append(&draw_commands, Drawable{bounds = rect_make(100, 20, 50, 100), color = WHITE})
+	// append(&draw_commands, Drawable{bounds = rect_make(100, 20, 50, 100), color = WHITE})
 
 	{
+		sprite := game.sprite_names["widget"]
 		ui_begin(input)
 		ui_base_color: Color = {207, 185, 151, 255}
+		ui_set_style_var(.UnitW, 40)
+		ui_set_style_var(.UnitH, 40)
 		ui_set_style_var(.WidgetBaseColor, ui_base_color)
 		ui_set_style_var(.WidgetHoverColor, BLUE)
 		ui_set_style_var(.WidgetHeldColor, RED)
+		ui_set_style_var(.WidgetTextColor, BLACK)
+		ui_set_style_var(.WidgetTextSize, 24)
+		ui_set_style_var(.PanelColor, WHITE)
 
 		{
 			ui_panel(.Vertical)
+			ui_box_set_background(sprite)
 
-			if ui_button(1) {
+			if ui_button("Hello", 2, 1) {
 				fmt.println("Hello")
 			}
 
 			ui_vspace()
 
-			if ui_button(2) {
+			if ui_button("Goodbye", 2, 1) {
 				fmt.println("Goodbye")
 			}
 		}
