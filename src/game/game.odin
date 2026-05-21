@@ -71,7 +71,7 @@ Rect_Gradient :: [4]Color
 
 rect_gradient_shaded :: proc(
 	base: Color,
-	relief: f32 = 1.0,
+	relief: f32,
 	light_strength: f32 = 0.45,
 	dark_strength: f32 = 0.55,
 ) -> Rect_Gradient {
@@ -219,3 +219,4 @@ update_and_render :: proc(arena: mem.Allocator, game: ^Game, input: Platform_Inp
 
 	return draw_commands[:]
 }
+

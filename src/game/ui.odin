@@ -422,16 +422,11 @@ ui_button :: proc(text: string, width: f32, height: f32) -> bool {
 
 	ui_box_set_text(text, text_color, pixel_height)
 
-	{
-		color := ui_get_style_var(.WidgetBorderColor).(Color)
-		thickness := ui_get_style_var(.WidgetBorderThickness).(f32)
-		radius := ui_get_style_var(.WidgetBorderRadius).(f32)
-		ui_box_set_border(color, thickness, radius)
-	}
-
 	color_var: Ui_StyleVar
+	relief: f32 = 1.0
 	if sig.is_held {
 		color_var = Ui_StyleVar.WidgetHeldColor
+		relief *= -1
 	} else if sig.is_hovered {
 		color_var = Ui_StyleVar.WidgetHoverColor
 	} else {
@@ -440,7 +435,14 @@ ui_button :: proc(text: string, width: f32, height: f32) -> bool {
 	color := ui_get_style_var(color_var).(Color)
 
 	ui_box_pixel_size({width, height} * unit_size)
-	ui_box_set_fill(rect_gradient_shaded(color))
+	ui_box_set_fill(rect_gradient_shaded(color, relief))
+
+	{
+		color := ui_get_style_var(.WidgetBorderColor).(Color)
+		thickness := ui_get_style_var(.WidgetBorderThickness).(f32)
+		radius := ui_get_style_var(.WidgetBorderRadius).(f32)
+		ui_box_set_border(rect_gradient_shaded(color, relief), thickness, radius)
+	}
 
 	return sig.is_clicked
 }
@@ -453,3 +455,4 @@ ui_panel :: proc(axis: Axis) {
 	color := ui_get_style_var(Ui_StyleVar.PanelColor).(Color)
 	ui_box_set_fill(color)
 }
+

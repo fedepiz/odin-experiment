@@ -120,7 +120,7 @@ gl_init :: proc() {
 		gl.EnableVertexAttribArray(5)
 		gl.VertexAttribPointer(
 			5, // location
-			2, // 4 floats (vec4)
+			4, // 4 floats (vec4)
 			gl.FLOAT,
 			false, // no normalisation
 			size_of(Vertex), // stride
@@ -803,3 +803,4 @@ load_font_from_file :: proc(path: string) -> FontData {
 	}
 	return out
 }
+
