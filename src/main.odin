@@ -10,10 +10,13 @@ import stbtt "vendor:stb/truetype"
 import gl "vendor:OpenGL"
 import "vendor:glfw"
 
-import core "core"
 import "game"
+import "util"
+
+import "csv"
 
 PLATFORM: struct {
+	window_size:            [2]f32,
 	key_down_now:           [glfw.KEY_LAST]bool,
 	key_down_prev:          [glfw.KEY_LAST]bool,
 	mouse_button_down_now:  [glfw.MOUSE_BUTTON_LAST]bool,
@@ -352,8 +355,8 @@ Batch :: struct {
 	elements: []Element,
 }
 
-pos_to_ndc :: proc(pos: [2]f32) -> [2]f32 {
-	return (pos / {800, 600} * 2 - 1) * {1, -1}
+pos_to_ndc :: proc(pos: [2]f32, window: [2]f32) -> [2]f32 {
+	return (pos / window * 2 - 1) * {1, -1}
 }
 
 draw_call :: proc(batch: Batch) {
@@ -373,7 +376,7 @@ draw_call :: proc(batch: Batch) {
 		uv: [4][2]f32 = {{0, 0}, {1, 0}, {1, 1}, {0, 1}}
 		for i := 0; i < 4; i += 1 {
 			// xy is the screen position.
-			xy := pos_to_ndc(elem.xy[i])
+			xy := pos_to_ndc(elem.xy[i], PLATFORM.window_size)
 
 			vertex := Vertex {
 				xy            = xy,
@@ -462,8 +465,7 @@ load_texture_from_pixels :: proc(pixels: [^]byte, w: i32, h: i32) -> Texture {
 }
 
 main :: proc() {
-	// Initialize scratch memory for this thread
-	core.init_scratch(100_000_000)
+	util.init_scratch(100_000_000) // Initialize scratch memory for this thread
 
 	// Arenas
 	arenas: struct {
@@ -494,7 +496,10 @@ main :: proc() {
 	// With macos compatibility
 	glfw.WindowHint(glfw.OPENGL_FORWARD_COMPAT, true)
 
-	window := glfw.CreateWindow(800, 600, "Application", nil, nil)
+	screen_width :: 1600
+	screen_height :: 900
+
+	window := glfw.CreateWindow(screen_width, screen_height, "Application", nil, nil)
 	if window == nil {
 		fmt.println("Failed to initialise window")
 		return
@@ -506,7 +511,7 @@ main :: proc() {
 	glfw.SetCursorPosCallback(window, cursor_pos_callback)
 
 	gl.load_up_to(3, 3, glfw.gl_set_proc_address)
-	gl.Viewport(0, 0, 800, 600)
+	gl.Viewport(0, 0, screen_width, screen_height)
 
 	gl_init()
 	defer gl_deinit()
@@ -563,6 +568,11 @@ main :: proc() {
 		mem.free_all(frame_arena)
 
 		glfw.PollEvents()
+
+		{
+			x, y := glfw.GetFramebufferSize(window)
+			PLATFORM.window_size = {f32(x), f32(y)}
+		}
 
 		// Press Escape to exit
 		if is_key_pressed(glfw.KEY_ESCAPE) {
@@ -788,7 +798,7 @@ grayscale_to_rgba :: proc(arena: mem.Allocator, grayscale: []byte) -> []byte {
 }
 
 load_font_from_file :: proc(path: string) -> FontData {
-	scratch := core.with_scratch(nil)
+	scratch := util.with_scratch(nil)
 	out: FontData
 
 	image_dim: i32 = 512

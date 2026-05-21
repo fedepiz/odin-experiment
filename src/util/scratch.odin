@@ -1,4 +1,4 @@
-package base
+package util
 
 import "core:mem"
 import "core:os"
@@ -64,3 +64,4 @@ release_scratch :: proc(arena_temp: ArenaTemp) {
 with_scratch :: proc(conflicts: []mem.Allocator) -> ArenaTemp {
 	return get_scratch(nil)
 }
+
