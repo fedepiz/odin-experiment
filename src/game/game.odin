@@ -41,6 +41,11 @@ color_raw :: proc(color: Color) -> [4]f32 {
 	return cast([4]f32)color
 }
 
+color_rgba8 :: proc(r, g, b, a: u8) -> Color {
+	vec: [4]u8 = {r, g, b, a}
+	return cast([4]f32)(vec) / 255
+}
+
 color_mix :: proc(c1: Color, c2: Color, t: f32) -> Color {
 	t := clamp(t, 0, 1)
 	// Lerp every colour
@@ -101,11 +106,20 @@ DrawableText :: struct {
 	pos:          DrawTextPos,
 }
 
+SpriteMapping :: enum {
+	Stretch,
+	Wrap,
+}
+
 Drawable :: struct {
-	bounds: Rect,
-	color:  Rect_Gradient,
-	sprite: Asset_Id,
-	text:   DrawableText,
+	bounds:         Rect,
+	color:          Rect_Gradient,
+	stroke:         Rect_Gradient,
+	thickness:      f32,
+	radius:         f32,
+	sprite:         Asset_Id,
+	sprite_mapping: SpriteMapping,
+	text:           DrawableText,
 }
 
 Assets_Request :: struct {
@@ -165,38 +179,22 @@ Platform_Input :: struct {
 update_and_render :: proc(arena: mem.Allocator, game: ^Game, input: Platform_Input) -> []Drawable {
 	draw_commands: [dynamic]Drawable = make([dynamic]Drawable, 0, 1024, allocator = arena)
 
-
-	// append(
-	// 	&draw_commands,
-	// 	Drawable{bounds = rect_make(10, 20, 50, 100), color = GREEN, sprite = sprite},
-	// )
-	// append(
-	// 	&draw_commands,
-	// 	Drawable{bounds = rect_make(40, 40, 200, 200), color = WHITE, sprite = sprite},
-	// )
-
-	// append(
-	// 	&draw_commands,
-	// 	Drawable {
-	// 		bounds = rect_make(200, 200, 50, 100),
-	// 		color = rect_gradient_shaded(RED, 1.0, 0.45, 0.55),
-	// 	},
-	// )
-
-	// append(&draw_commands, Drawable{bounds = rect_make(100, 20, 50, 100), color = WHITE})
-
 	{
-		sprite := game.sprite_names["widget"]
-		ui_begin(input)
-		ui_base_color: Color = {207, 185, 151, 255}
-		ui_set_style_var(.UnitW, 40)
+		base_color := color_rgba8(207, 185, 151, 255)
+		ui_set_style_var(.UnitW, 80)
 		ui_set_style_var(.UnitH, 40)
-		ui_set_style_var(.WidgetBaseColor, ui_base_color)
+		ui_set_style_var(.WidgetBaseColor, base_color)
 		ui_set_style_var(.WidgetHoverColor, BLUE)
 		ui_set_style_var(.WidgetHeldColor, RED)
 		ui_set_style_var(.WidgetTextColor, BLACK)
 		ui_set_style_var(.WidgetTextSize, 24)
+		ui_set_style_var(.WidgetBorderColor, color_mix(base_color, BLACK, 0.5))
+		ui_set_style_var(.WidgetBorderRadius, 10)
+		ui_set_style_var(.WidgetBorderThickness, 5)
 		ui_set_style_var(.PanelColor, WHITE)
+
+		sprite := game.sprite_names["widget"]
+		ui_begin(input)
 
 		{
 			ui_panel(.Vertical)

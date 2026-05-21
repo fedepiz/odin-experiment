@@ -64,6 +64,9 @@ Ui_StyleVar :: enum {
 	WidgetHeldColor,
 	WidgetTextColor,
 	WidgetTextSize,
+	WidgetBorderColor,
+	WidgetBorderThickness,
+	WidgetBorderRadius,
 	PanelColor,
 }
 
@@ -90,6 +93,12 @@ ui_style_var_type :: proc(var: Ui_StyleVar) -> Ui_StyleVarType {
 		return .Color
 	case .WidgetTextSize:
 		return .Number
+	case .WidgetBorderColor:
+		return .Color
+	case .WidgetBorderThickness:
+		return .Number
+	case .WidgetBorderRadius:
+		return .Number
 	case .PanelColor:
 		return .Color
 	case:
@@ -111,6 +120,10 @@ Ui_Box :: struct {
 	growth_axis:  [2]f32,
 	background:   Asset_Id,
 	fill:         Rect_Gradient,
+	// Border
+	stroke:       Rect_Gradient,
+	thickness:    f32,
+	radius:       f32,
 	// Text
 	text:         string,
 	font:         Asset_Id,
@@ -264,6 +277,10 @@ ui_end :: proc() -> []Drawable {
 			bounds = ui_box.bounds,
 			color = ui_box.fill,
 			sprite = ui_box.background,
+			sprite_mapping = .Wrap,
+			stroke = ui_box.stroke,
+			thickness = ui_box.thickness,
+			radius = ui_box.radius,
 			text = {
 				content = ui_box.text,
 				pixel_height = ui_box.pixel_height,
@@ -324,6 +341,15 @@ ui_box_set_fill :: proc(color: Rect_Gradient) {
 	if UI.active != nil {
 		UI.active.fill = color
 	}
+}
+
+ui_box_set_border :: proc(color: Rect_Gradient, thickness: f32, radius: f32) {
+	if UI.active != nil {
+		UI.active.stroke = color
+		UI.active.thickness = thickness
+		UI.active.radius = radius
+	}
+
 }
 
 ui_box_set_background :: proc(background: Asset_Id) {
@@ -395,6 +421,13 @@ ui_button :: proc(text: string, width: f32, height: f32) -> bool {
 	pixel_height := ui_get_style_var(.WidgetTextSize).(f32)
 
 	ui_box_set_text(text, text_color, pixel_height)
+
+	{
+		color := ui_get_style_var(.WidgetBorderColor).(Color)
+		thickness := ui_get_style_var(.WidgetBorderThickness).(f32)
+		radius := ui_get_style_var(.WidgetBorderRadius).(f32)
+		ui_box_set_border(color, thickness, radius)
+	}
 
 	color_var: Ui_StyleVar
 	if sig.is_held {

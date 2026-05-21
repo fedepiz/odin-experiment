@@ -22,9 +22,14 @@ PLATFORM: struct {
 }
 
 Vertex :: struct {
-	xy:    [2]f32,
-	uv:    [2]f32,
-	color: [4]f32,
+	xy:           [2]f32,
+	uv:           [2]f32,
+	st:           [2]f32,
+	color:        [4]f32,
+	frag_size_px: [2]f32,
+	stroke:       [4]f32,
+	thickness:    f32,
+	radius:       f32,
 }
 
 VERTICES_MAX :: 1024
@@ -77,16 +82,71 @@ gl_init :: proc() {
 			size_of(Vertex), // stride
 			offset_of(Vertex, uv), // offset
 		)
-
-		// layout (location = 2) vec4 a_col
+		//
+		// layout (location = 2) vec2 a_uv
 		gl.EnableVertexAttribArray(2)
 		gl.VertexAttribPointer(
 			2, // location
+			2, // 2 floats (vec2)
+			gl.FLOAT,
+			false, // no normalisation
+			size_of(Vertex), // stride
+			offset_of(Vertex, st), // offset
+		)
+
+		// layout (location = 3) vec4 a_col
+		gl.EnableVertexAttribArray(3)
+		gl.VertexAttribPointer(
+			3, // location
 			4, // 4 floats (vec4)
 			gl.FLOAT,
 			false, // no normalisation
 			size_of(Vertex), // stride
 			offset_of(Vertex, color), // offset
+		)
+		//
+		// layout (location = 4) vec4 a_col
+		gl.EnableVertexAttribArray(4)
+		gl.VertexAttribPointer(
+			4, // location
+			2, // 4 floats (vec4)
+			gl.FLOAT,
+			false, // no normalisation
+			size_of(Vertex), // stride
+			offset_of(Vertex, frag_size_px), // offset
+		)
+		//
+		// layout (location = 5) vec4 a_col
+		gl.EnableVertexAttribArray(5)
+		gl.VertexAttribPointer(
+			5, // location
+			2, // 4 floats (vec4)
+			gl.FLOAT,
+			false, // no normalisation
+			size_of(Vertex), // stride
+			offset_of(Vertex, stroke), // offset
+		)
+		//
+		// layout (location = 6) vec4 a_col
+		gl.EnableVertexAttribArray(6)
+		gl.VertexAttribPointer(
+			6, // location
+			1, // 4 floats (vec4)
+			gl.FLOAT,
+			false, // no normalisation
+			size_of(Vertex), // stride
+			offset_of(Vertex, thickness), // offset
+		)
+		//
+		// layout (location = 6) vec4 a_col
+		gl.EnableVertexAttribArray(7)
+		gl.VertexAttribPointer(
+			7, // location
+			1, // 4 floats (vec4)
+			gl.FLOAT,
+			false, // no normalisation
+			size_of(Vertex), // stride
+			offset_of(Vertex, radius), // offset
 		)
 	}
 }
@@ -100,9 +160,13 @@ gl_deinit :: proc() {
 
 
 Element :: struct {
-	xy:    [4][2]f32,
-	uv:    [4][2]f32,
-	color: [4][4]f32,
+	xy:        [4][2]f32,
+	st:        [4][2]f32,
+	color:     [4][4]f32,
+	size:      [2]f32,
+	stroke:    [4][4]f32,
+	thickness: f32,
+	radius:    f32,
 }
 
 DrawCommand :: struct {
@@ -156,12 +220,27 @@ translate_draw_commands :: proc(alloc: mem.Allocator, commands: []game.Drawable)
 	)
 	for draw in commands {
 		if draw.bounds.w > 0 && draw.bounds.h > 0 {
-			elem := Element {
-				xy    = game.rect_corners(draw.bounds),
-				uv    = {{0, 0}, {1, 0}, {1, 1}, {0, 1}},
-				color = draw.color,
-			}
 			texture := GL.sprite_textures[draw.sprite]
+
+			uv: [4][2]f32 = ---
+			switch (draw.sprite_mapping) {
+			case .Stretch:
+				uv = {{0, 0}, {1, 0}, {1, 1}, {0, 1}}
+			case .Wrap:
+				w := draw.bounds.w / texture.size.x
+				h := draw.bounds.h / texture.size.y
+				uv = {{0, 0}, {w, 0}, {w, h}, {0, h}}
+			}
+
+			elem := Element {
+				xy        = game.rect_corners(draw.bounds),
+				st        = uv,
+				color     = draw.color,
+				size      = game.rect_size(draw.bounds),
+				stroke    = draw.stroke,
+				thickness = draw.thickness,
+				radius    = draw.radius,
+			}
 			append(&out, DrawCommand{element = elem, texture = texture})
 		}
 
@@ -211,8 +290,9 @@ translate_draw_commands :: proc(alloc: mem.Allocator, commands: []game.Drawable)
 						{pos.x + q.x1 * scale, pos.y + q.y1 * scale},
 						{pos.x + q.x0 * scale, pos.y + q.y1 * scale},
 					},
-					uv    = {{q.s0, q.t0}, {q.s1, q.t0}, {q.s1, q.t1}, {q.s0, q.t1}},
+					st    = {{q.s0, q.t0}, {q.s1, q.t0}, {q.s1, q.t1}, {q.s0, q.t1}},
 					color = draw.text.color,
+					size  = {q.x1 - q.x0, q.y1 - q.y0},
 				}
 				append(&out, DrawCommand{element = element, texture = font.texture})
 			}
@@ -275,11 +355,20 @@ draw_call :: proc(batch: Batch) {
 			append(&GL.indices, u32(len(GL.vertices) + index_pattern[i]))
 		}
 
+		uv: [4][2]f32 = {{0, 0}, {1, 0}, {1, 1}, {0, 1}}
 		for i := 0; i < 4; i += 1 {
+			// xy is the screen position.
+			xy := pos_to_ndc(elem.xy[i])
+
 			vertex := Vertex {
-				xy    = pos_to_ndc(elem.xy[i]),
-				uv    = elem.uv[i],
-				color = game.color_raw(elem.color[i]),
+				xy           = xy,
+				uv           = uv[i],
+				st           = elem.st[i],
+				color        = elem.color[i],
+				frag_size_px = elem.size,
+				stroke       = elem.stroke[i],
+				thickness    = elem.thickness,
+				radius       = elem.radius,
 			}
 			append(&GL.vertices, vertex)
 		}
@@ -308,7 +397,7 @@ draw_call :: proc(batch: Batch) {
 
 
 	gl.ActiveTexture(gl.TEXTURE0)
-	gl.BindTexture(gl.TEXTURE_2D, batch.texture)
+	gl.BindTexture(gl.TEXTURE_2D, batch.texture.id)
 
 	u_texture := gl.GetUniformLocation(GL.program, "u_texture")
 	gl.Uniform1i(u_texture, 0)
@@ -316,7 +405,10 @@ draw_call :: proc(batch: Batch) {
 	gl.DrawElements(gl.TRIANGLES, i32(len(GL.indices)), gl.UNSIGNED_INT, nil)
 }
 
-Texture :: u32
+Texture :: struct {
+	id:   u32,
+	size: [2]f32,
+}
 
 load_texture_from_file :: proc(path: cstring) -> Texture {
 	w, h, channels: i32
@@ -330,11 +422,11 @@ load_texture_from_file :: proc(path: cstring) -> Texture {
 }
 
 load_texture_from_pixels :: proc(pixels: [^]byte, w: i32, h: i32) -> Texture {
-	texture: u32
+	texture: Texture
 	target :: gl.TEXTURE_2D
 
-	gl.GenTextures(1, &texture)
-	gl.BindTexture(target, texture)
+	gl.GenTextures(1, &texture.id)
+	gl.BindTexture(target, texture.id)
 
 	// Wrapping
 	gl.TexParameteri(target, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
@@ -347,6 +439,8 @@ load_texture_from_pixels :: proc(pixels: [^]byte, w: i32, h: i32) -> Texture {
 	gl.TexImage2D(target, 0, i32(gl.RGBA8), w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixels)
 
 	gl.BindTexture(target, 0)
+
+	texture.size = {f32(w), f32(h)}
 
 	return texture
 }
@@ -540,30 +634,68 @@ is_button_pressed :: proc(button: i32) -> bool {
 
 VERT_SHADER_SOURCE :: `
 #version 330 core
-layout (location = 0) in vec2 a_pos;
+layout (location = 0) in vec2 a_xy;
 layout (location = 1) in vec2 a_uv;
-layout (location = 2) in vec4 a_col;
+layout (location = 2) in vec2 a_st;
+layout (location = 3) in vec4 a_col;
+layout (location = 4) in vec2 a_frag_size_px;
+layout (location = 5) in vec4 a_stroke;
+layout (location = 6) in float a_thickness_px;
+layout (location = 7) in float a_radius_px;
 
 out vec2 v_uv;
+out vec2 v_st;
 out vec4 v_col;
+out vec2 v_frag_size_px;
+out vec4 v_stroke;
+out float v_thickness_px;
+out float v_radius_px;
 
 void main() {
-	gl_Position = vec4(a_pos, 0.0, 1.0);
+	gl_Position = vec4(a_xy, 0.0, 1.0);
 	v_uv = a_uv;
+	v_st = a_st;
 	v_col = a_col;
+	v_frag_size_px = a_frag_size_px;
+	v_stroke = a_stroke;
+	v_thickness_px = a_thickness_px;
+	v_radius_px = a_radius_px;
 }
 `
 
 FRAG_SHADER_SOURCE :: `
 #version 330 core
 in vec2 v_uv;
+in vec2 v_st;
 in vec4 v_col;
+in vec2 v_frag_size_px;
+in vec4 v_stroke;
+in float v_thickness_px;
+in float v_radius_px;
+
 out vec4 frag_color;
 
 uniform sampler2D u_texture;
+float RoundedBoxSDF(vec2 p, vec2 half_size, float radius) {
+  vec2 q = abs(p) - half_size + vec2(radius);
+  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
+}
 
 void main() {
-	frag_color = texture(u_texture, v_uv) * v_col;
+	vec2 half_size = v_frag_size_px * 0.5;
+	float radius = min(v_radius_px, min(half_size.x, half_size.y));
+	vec2 p = (v_uv - 0.5) * v_frag_size_px;
+	float sd = RoundedBoxSDF(p, half_size, radius);
+
+	float aa = fwidth(sd);
+	float mask_outer = 1.0 - smoothstep(0.0, aa, sd);
+	float mask_inner = 1.0 - smoothstep(0.0, aa, sd + v_thickness_px);
+	float stroke = mask_outer - mask_inner;
+
+	vec4 fill_col = texture(u_texture, v_st) * v_col;
+	vec4 col = fill_col * mask_inner + v_stroke * stroke;
+
+	frag_color = col;
 }
 `
 
