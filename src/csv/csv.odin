@@ -12,11 +12,6 @@ Row :: []Cell
 
 Table :: []Row
 
-ParseResult :: struct {
-	table:  Table,
-	errors: []string,
-}
-
 clone_string :: proc(alloc: mem.Allocator, s: string) -> string {
 	if len(s) == 0 {
 		return ""
@@ -134,17 +129,16 @@ parse :: proc(alloc: mem.Allocator, source: string) -> (Table, []string) {
 	return table[:], errors[:]
 }
 
-
-RowReader :: struct {
+Row_Reader :: struct {
 	row:      Row,
 	cell_idx: int,
 }
 
-read_row :: proc(row: Row) -> RowReader {
+read_row :: proc(row: Row) -> Row_Reader {
 	return {row = row, cell_idx = 0}
 }
 
-read_cell :: proc(row: ^RowReader) -> Cell {
+read_cell :: proc(row: ^Row_Reader) -> Cell {
 	cell: Cell
 	if row.cell_idx < len(row.row) {
 		row.cell_idx += 1
@@ -153,11 +147,11 @@ read_cell :: proc(row: ^RowReader) -> Cell {
 	return cell
 }
 
-read_num :: proc(row: ^RowReader) -> f32 {
+read_num :: proc(row: ^Row_Reader) -> f32 {
 	return read_cell(row).number
 }
 
-read_text :: proc(row: ^RowReader) -> string {
+read_text :: proc(row: ^Row_Reader) -> string {
 	return read_cell(row).text
 }
 

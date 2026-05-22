@@ -48,6 +48,8 @@ GL: struct {
 	indices:         [dynamic; INDICES_MAX]u32,
 	sprite_textures: [dynamic; 1024]Texture,
 	fonts:           [dynamic; 32]FontData,
+	terrain_keys:    Texture,
+	terrain_atlas:   Texture,
 }
 
 gl_init :: proc() {
@@ -359,7 +361,7 @@ pos_to_ndc :: proc(pos: [2]f32, window: [2]f32) -> [2]f32 {
 	return (pos / window * 2 - 1) * {1, -1}
 }
 
-draw_call :: proc(batch: Batch) {
+draw_batch :: proc(batch: Batch) {
 	// Reset buffer states
 	clear(&GL.vertices)
 	clear(&GL.indices)
@@ -393,6 +395,51 @@ draw_call :: proc(batch: Batch) {
 		}
 	}
 
+	draw_call(batch.texture, 1)
+}
+
+
+draw_terrain :: proc(camera: Camera, world_unit: f32) {
+	clear(&GL.vertices)
+	clear(&GL.indices)
+
+	terrain_tile_size := 40
+	window := PLATFORM.window_size
+	zoom := max(camera.zoom, 0.001)
+	screen_center := window * 0.5
+	xy: [4][2]f32 = {{0, 0}, {window.x, 0}, {window.x, window.y}, {0, window.y}}
+
+	key_coord: [4][2]f32
+	st_coord: [4][2]f32
+	for i := 0; i < 4; i += 1 {
+		world_px := camera.pos + (xy[i] - screen_center) / zoom
+		key_coord[i] = world_px / f32(world_unit)
+		st_coord[i] = world_px / f32(terrain_tile_size)
+	}
+
+	uv: [4][2]f32 = {
+		(key_coord[0] + 0.5) / GL.terrain_keys.size,
+		(key_coord[1] + 0.5) / GL.terrain_keys.size,
+		(key_coord[2] + 0.5) / GL.terrain_keys.size,
+		(key_coord[3] + 0.5) / GL.terrain_keys.size,
+	}
+
+	st: [4][2]f32 = {st_coord[0], st_coord[1], st_coord[2], st_coord[3]}
+
+	append(&GL.indices, 0, 1, 2, 2, 3, 0)
+
+	for i := 0; i < 4; i += 1 {
+		append(
+			&GL.vertices,
+			Vertex{xy = pos_to_ndc(xy[i], window), uv = uv[i], st = st[i], color = game.WHITE},
+		)
+	}
+
+	draw_call({}, 2)
+}
+
+
+draw_call :: proc(texture: Texture, mode: i32) {
 	gl.Enable(gl.BLEND)
 	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 
@@ -415,13 +462,34 @@ draw_call :: proc(batch: Batch) {
 	)
 
 
-	gl.ActiveTexture(gl.TEXTURE0)
-	gl.BindTexture(gl.TEXTURE_2D, batch.texture.id)
+	{
+		gl.ActiveTexture(gl.TEXTURE0)
+		gl.BindTexture(gl.TEXTURE_2D, texture.id)
+		u_texture := gl.GetUniformLocation(GL.program, "u_texture")
+		gl.Uniform1i(u_texture, 0)
+	}
 
-	u_texture := gl.GetUniformLocation(GL.program, "u_texture")
-	gl.Uniform1i(u_texture, 0)
+	{
+		gl.ActiveTexture(gl.TEXTURE1)
+		gl.BindTexture(gl.TEXTURE_2D, GL.terrain_keys.id)
+		loc := gl.GetUniformLocation(GL.program, "u_terrain_keys")
+		gl.Uniform1i(loc, 1)
+	}
+
+	{
+		gl.ActiveTexture(gl.TEXTURE2)
+		gl.BindTexture(gl.TEXTURE_2D, GL.terrain_atlas.id)
+		loc := gl.GetUniformLocation(GL.program, "u_terrain_atlas")
+		gl.Uniform1i(loc, 2)
+	}
+
+	{
+		loc := gl.GetUniformLocation(GL.program, "u_mode")
+		gl.Uniform1i(loc, mode)
+	}
 
 	gl.DrawElements(gl.TRIANGLES, i32(len(GL.indices)), gl.UNSIGNED_INT, nil)
+
 }
 
 Texture :: struct {
@@ -429,7 +497,12 @@ Texture :: struct {
 	size: [2]f32,
 }
 
-load_texture_from_file :: proc(path: cstring) -> Texture {
+Texture_Filter_Mode :: enum {
+	Linear,
+	Nearest,
+}
+
+load_texture_from_file :: proc(path: cstring, filter_mode: Texture_Filter_Mode) -> Texture {
 	w, h, channels: i32
 	pixels := image.load(path, &w, &h, &channels, 4)
 	if pixels == nil {
@@ -437,10 +510,15 @@ load_texture_from_file :: proc(path: cstring) -> Texture {
 	}
 	defer image.image_free(pixels)
 
-	return load_texture_from_pixels(pixels, w, h)
+	return load_texture_from_pixels(pixels, w, h, filter_mode)
 }
 
-load_texture_from_pixels :: proc(pixels: [^]byte, w: i32, h: i32) -> Texture {
+load_texture_from_pixels :: proc(
+	pixels: [^]byte,
+	w: i32,
+	h: i32,
+	filter_mode: Texture_Filter_Mode,
+) -> Texture {
 	texture: Texture
 	target :: gl.TEXTURE_2D
 
@@ -452,8 +530,15 @@ load_texture_from_pixels :: proc(pixels: [^]byte, w: i32, h: i32) -> Texture {
 	gl.TexParameteri(target, gl.TEXTURE_WRAP_T, gl.REPEAT)
 
 	// Filtering
-	gl.TexParameteri(target, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-	gl.TexParameteri(target, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+	filter: i32 = ---
+	switch (filter_mode) {
+	case .Linear:
+		filter = gl.LINEAR
+	case .Nearest:
+		filter = gl.NEAREST
+	}
+	gl.TexParameteri(target, gl.TEXTURE_MIN_FILTER, filter)
+	gl.TexParameteri(target, gl.TEXTURE_MAG_FILTER, filter)
 
 	gl.TexImage2D(target, 0, i32(gl.RGBA8), w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixels)
 
@@ -462,6 +547,11 @@ load_texture_from_pixels :: proc(pixels: [^]byte, w: i32, h: i32) -> Texture {
 	texture.size = {f32(w), f32(h)}
 
 	return texture
+}
+
+Camera :: struct {
+	pos:  [2]f32,
+	zoom: f32,
 }
 
 main :: proc() {
@@ -482,6 +572,8 @@ main :: proc() {
 
 	root_arena: mem.Allocator = mem.dynamic_arena_allocator(&arenas.root)
 	frame_arena: mem.Allocator = mem.arena_allocator(&arenas.frame)
+
+	context.temp_allocator = frame_arena
 
 	if !glfw.Init() {
 		fmt.println("Failed to initialize glfw")
@@ -516,8 +608,73 @@ main :: proc() {
 	gl_init()
 	defer gl_deinit()
 
+	GL.terrain_atlas = load_texture_from_file("assets/terrain_types.png", .Linear)
+
 	game_state: game.Game
-	game.init(root_arena, &game_state)
+
+	{
+
+
+		terrain_types: csv.Table
+		{
+			source, err := os.read_entire_file("data/terrain_types.csv", frame_arena)
+			if err != nil {
+				fmt.println("ERROR: Failed to read terrain types table")
+			}
+			table, csv_errors := csv.parse(frame_arena, string(source))
+			for err in csv_errors {
+				fmt.printfln("CSV error: %s", err)
+			}
+			terrain_types = table
+		}
+
+		// Load the heightmap image...
+		heightmap: game.Heightmap
+		{
+			w, h, channels: i32
+			bytes := image.load("assets/britain.png", &w, &h, &channels, 1)
+			defer image.image_free(bytes)
+
+			heightmap.size = {int(w), int(h)}
+			heightmap.cells = make_slice([]f32, w * h, frame_arena)
+			for i in 0 ..< i32(len(heightmap.cells)) {
+				height := f32(bytes[i * channels]) / 255
+				heightmap.cells[i] = height
+			}
+		}
+
+		world_map_keys := game.init(
+			root_arena,
+			frame_arena,
+			&game_state,
+			game.Init_Params{terrain_types, heightmap},
+		)
+
+		{
+			// Create a texture
+			bytes, _ := mem.alloc_bytes_non_zeroed(
+				len(world_map_keys.cells) * 4,
+				allocator = frame_arena,
+			)
+			for i in 0 ..< len(world_map_keys.cells) {
+				cell := world_map_keys.cells[i]
+				bytes[i * 4] = cell.x
+				bytes[i * 4 + 1] = cell.y
+				bytes[i * 4 + 2] = 0
+				bytes[i * 4 + 3] = 0
+			}
+
+			size := world_map_keys.size
+			texture := load_texture_from_pixels(
+				raw_data(bytes),
+				i32(size.x),
+				i32(size.y),
+				.Nearest,
+			)
+
+			GL.terrain_keys = texture
+		}
+	}
 
 	font := load_font_from_file("assets/fonts/default.ttf")
 
@@ -528,7 +685,7 @@ main :: proc() {
 		for name in asset_reqs.sprites {
 			path := strings.join({"assets/", name, ".png"}, "", frame_arena)
 			cpath := strings.clone_to_cstring(path, frame_arena)
-			texture := load_texture_from_file(cpath)
+			texture := load_texture_from_file(cpath, .Linear)
 			id := len(GL.sprite_textures)
 			append(&GL.sprite_textures, texture)
 
@@ -564,7 +721,16 @@ main :: proc() {
 		game.start(&game_state, assets)
 	}
 
+	camera: Camera
+	camera.zoom = 1
+
+	current_time := glfw.GetTime()
 	for !glfw.WindowShouldClose(window) {
+		next_time := glfw.GetTime()
+		delta := f32(next_time - current_time)
+		fps := delta > 0 ? 1.0 / delta : 0
+
+		current_time = next_time
 		mem.free_all(frame_arena)
 
 		glfw.PollEvents()
@@ -595,18 +761,43 @@ main :: proc() {
 		PLATFORM.key_down_prev = PLATFORM.key_down_now
 		PLATFORM.mouse_button_down_prev = PLATFORM.mouse_button_down_now
 
-		batches := batch_draw_commands(
-			frame_arena,
-			translate_draw_commands(frame_arena, drawables),
-		)
+		world_unit :: 10.0
 
-		for batch in batches {
-			//"Interpret" draw commands
-			draw_call(batch)
+		{
+			// Key actions
+			Action :: struct {
+				key: i32,
+				dv:  [2]f32,
+				dz:  f32,
+			}
+
+			ACTIONS := [?]Action {
+				{glfw.KEY_S, {0, 1}, 0},
+				{glfw.KEY_W, {0, -1}, 0},
+				{glfw.KEY_A, {-1, 0}, 0},
+				{glfw.KEY_D, {1, 0}, 0},
+				{glfw.KEY_Q, {0, 0}, 1},
+				{glfw.KEY_E, {0, 0}, -1},
+			}
+
+			for action in ACTIONS {
+				if is_key_down(action.key) {
+					camera.pos += action.dv * world_unit * 75 * delta / camera.zoom
+					camera.zoom *= 1.0 + action.dz * world_unit * delta * 0.25
+					camera.zoom = clamp(camera.zoom, 0.1, 20.0)
+				}
+			}
 		}
 
-		// batch := text_to_batch(frame_arena, "Hello, World!", game.BLACK, &font, {100, 100}, 24)
-		// draw_call(batch)
+		draw_terrain(camera, world_unit)
+
+		{
+			elements := translate_draw_commands(frame_arena, drawables)
+			batches := batch_draw_commands(frame_arena, elements)
+			for batch in batches {
+				draw_batch(batch)
+			}
+		}
 
 		glfw.SwapBuffers(window)
 
@@ -705,13 +896,21 @@ in float v_tex_intensity;
 
 out vec4 frag_color;
 
+uniform int u_mode;
+
 uniform sampler2D u_texture;
+uniform sampler2D u_terrain_keys;
+uniform sampler2D u_terrain_atlas;
+
+const int MODE_DEFAULT = 1;
+const int MODE_TERRAIN = 2;
+
 float RoundedBoxSDF(vec2 p, vec2 half_size, float radius) {
   vec2 q = abs(p) - half_size + vec2(radius);
   return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
 }
 
-void main() {
+vec4 default_mode() {
 	vec2 half_size = v_frag_size_px * 0.5;
 	float radius = min(v_radius_px, min(half_size.x, half_size.y));
 	vec2 p = (v_uv - 0.5) * v_frag_size_px;
@@ -726,7 +925,51 @@ void main() {
 	vec4 fill_col =  mix(v_col, tex * v_col, v_tex_intensity);
 	vec4 col = fill_col * mask_inner + v_stroke * stroke;
 
-	frag_color = col;
+	return col;
+}
+
+ivec2 terrain_tile_coord_from_key(ivec2 key_coord, ivec2 key_size, ivec2 atlas_tile_count) {
+	ivec2 clamped_key_coord = clamp(key_coord, ivec2(0, 0), key_size - ivec2(1, 1));
+	vec4 key = texelFetch(u_terrain_keys, clamped_key_coord, 0);
+	ivec2 tile_coord = ivec2(round(key.rg * 255.0));
+	return clamp(tile_coord, ivec2(0, 0), atlas_tile_count - ivec2(1, 1));
+}
+
+vec4 sample_terrain_tile(ivec2 tile_coord, vec2 tile_st, vec2 atlas_size, vec2 tile_size) {
+	vec2 wrapped_st = fract(tile_st);
+	vec2 clamped_st = clamp(wrapped_st, 0.0, 1.0);
+	vec2 atlas_px = vec2(tile_coord) * tile_size + clamped_st * (tile_size - 1.0) + 0.5;
+	return texture(u_terrain_atlas, atlas_px / atlas_size);
+}
+
+vec4 terrain_mode() {
+	ivec2 key_size = textureSize(u_terrain_keys, 0);
+	vec2 atlas_size = vec2(textureSize(u_terrain_atlas, 0));
+	vec2 tile_size = vec2(256.0, 256.0);
+	ivec2 atlas_tile_count = ivec2(atlas_size / tile_size);
+
+	vec2 key_pos = v_uv * vec2(key_size) - 0.5;
+	ivec2 key_base = ivec2(floor(key_pos));
+	vec2 key_blend = fract(key_pos);
+
+	vec4 c00 = sample_terrain_tile(terrain_tile_coord_from_key(key_base + ivec2(0, 0), key_size, atlas_tile_count), v_st, atlas_size, tile_size);
+	vec4 c10 = sample_terrain_tile(terrain_tile_coord_from_key(key_base + ivec2(1, 0), key_size, atlas_tile_count), v_st, atlas_size, tile_size);
+	vec4 c11 = sample_terrain_tile(terrain_tile_coord_from_key(key_base + ivec2(1, 1), key_size, atlas_tile_count), v_st, atlas_size, tile_size);
+	vec4 c01 = sample_terrain_tile(terrain_tile_coord_from_key(key_base + ivec2(0, 1), key_size, atlas_tile_count), v_st, atlas_size, tile_size);
+
+	vec4 cx0 = mix(c00, c10, key_blend.x);
+	vec4 cx1 = mix(c01, c11, key_blend.x);
+	return mix(cx0, cx1, key_blend.y);
+}
+
+void main() {
+	if (u_mode == MODE_DEFAULT) {
+		frag_color = default_mode();
+	} else if (u_mode == MODE_TERRAIN){
+		frag_color = terrain_mode();
+	} else {
+		frag_color = vec4(1,0,0,1);
+	}
 }
 `
 
@@ -826,7 +1069,12 @@ load_font_from_file :: proc(path: string) -> FontData {
 		)
 
 		bitmap_rgba := grayscale_to_rgba(scratch.arena, bitmap_gray)
-		out.texture = load_texture_from_pixels(raw_data(bitmap_rgba), image_dim, image_dim)
+		out.texture = load_texture_from_pixels(
+			raw_data(bitmap_rgba),
+			image_dim,
+			image_dim,
+			.Linear,
+		)
 
 		out.min_glyph = min_glyph
 		out.max_glyph = min_glyph + num_glyphs

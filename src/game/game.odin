@@ -1,5 +1,6 @@
 package game
 
+import "../csv"
 import "core:fmt"
 import "core:mem"
 V2 :: [2]f32
@@ -65,6 +66,7 @@ Game :: struct {
 	long_lived_arena: mem.Arena,
 	sprite_names:     map[string]Asset_Id,
 	font_names:       map[string]Asset_Id,
+	world_map:        World_Map,
 }
 
 Rect_Gradient :: [4]Color
@@ -140,14 +142,35 @@ Assets :: struct {
 	fonts:   []Asset_Def,
 }
 
+Init_Params :: struct {
+	terrain_types: csv.Table,
+	heightmap:     Heightmap,
+}
+
 // Prepare the game struct, preparing the various allocators etc
-init :: proc(alloc: mem.Allocator, game: ^Game) {
-	bytes, _ := mem.alloc_bytes_non_zeroed(10_000_000, allocator = alloc)
+init :: proc(
+	long_alloc: mem.Allocator,
+	short_alloc: mem.Allocator,
+	game: ^Game,
+	params: Init_Params,
+) -> World_Map_Tile_Keys {
+	bytes, _ := mem.alloc_bytes_non_zeroed(10_000_000, allocator = long_alloc)
 	mem.arena_init(&game.long_lived_arena, bytes)
 	long_lived_alloc := mem.arena_allocator(&game.long_lived_arena)
 	// Initialize the sprite map
 	game.sprite_names = make_map(map[string]Asset_Id, long_lived_alloc)
 	game.font_names = make_map(map[string]Asset_Id, long_lived_alloc)
+
+	world_map, world_keys := load_world_map(
+		long_alloc,
+		short_alloc,
+		params.terrain_types,
+		params.heightmap,
+	)
+
+	game.world_map = world_map
+
+	return world_keys
 }
 
 // Asks the game what assets it may need
