@@ -399,22 +399,20 @@ draw_batch :: proc(batch: Batch) {
 }
 
 
-draw_terrain :: proc(camera: Camera, world_unit: f32) {
+draw_terrain :: proc(camera: Camera) {
 	clear(&GL.vertices)
 	clear(&GL.indices)
 
-	terrain_tile_size := 40
+	terrain_tile_size: f32 = 40
 	window := PLATFORM.window_size
-	zoom := max(camera.zoom, 0.001)
-	screen_center := window * 0.5
 	xy: [4][2]f32 = {{0, 0}, {window.x, 0}, {window.x, window.y}, {0, window.y}}
 
 	key_coord: [4][2]f32
 	st_coord: [4][2]f32
 	for i := 0; i < 4; i += 1 {
-		world_px := camera.pos + (xy[i] - screen_center) / zoom
-		key_coord[i] = world_px / f32(world_unit)
-		st_coord[i] = world_px / f32(terrain_tile_size)
+		world_point := camera_point_screen_to_world(camera, xy[i], window)
+		key_coord[i] = world_point
+		st_coord[i] = terrain_point_world_to_st(camera, world_point, terrain_tile_size)
 	}
 
 	uv: [4][2]f32 = {
@@ -550,8 +548,43 @@ load_texture_from_pixels :: proc(
 }
 
 Camera :: struct {
-	pos:  [2]f32,
-	zoom: f32,
+	world_to_px: f32,
+	pos:         [2]f32,
+	zoom:        f32,
+}
+
+camera_point_screen_to_world :: proc(
+	camera: Camera,
+	screen_point_px: [2]f32,
+	viewport_size_px: [2]f32,
+) -> [2]f32 {
+	zoom := max(camera.zoom, 0.001)
+	screen_center := viewport_size_px * 0.5
+	world_per_screen_px := 1.0 / (camera.world_to_px * zoom)
+	return camera.pos + (screen_point_px - screen_center) * world_per_screen_px
+}
+
+delta_screen_to_world :: proc(camera: Camera, screen_delta_px: [2]f32) -> [2]f32 {
+	zoom := max(camera.zoom, 0.001)
+	world_per_screen_px := 1.0 / (camera.world_to_px * zoom)
+	return screen_delta_px * world_per_screen_px
+}
+
+terrain_point_world_to_st :: proc(
+	camera: Camera,
+	world_point: [2]f32,
+	terrain_tile_size: f32,
+) -> [2]f32 {
+	return world_point * camera.world_to_px / terrain_tile_size
+}
+
+camera_pan :: proc(camera: ^Camera, screen_delta_px: [2]f32) {
+	camera.pos += delta_screen_to_world(camera^, screen_delta_px)
+}
+
+camera_zoom_by :: proc(camera: ^Camera, factor: f32) {
+	camera.zoom *= factor
+	camera.zoom = clamp(camera.zoom, 0.1, 20.0)
 }
 
 main :: proc() {
@@ -721,8 +754,11 @@ main :: proc() {
 		game.start(&game_state, assets)
 	}
 
+
 	camera: Camera
-	camera.zoom = 1
+	camera.world_to_px = 10.0
+	camera.pos = {300, 250}
+	camera.zoom = 4
 
 	current_time := glfw.GetTime()
 	for !glfw.WindowShouldClose(window) {
@@ -761,7 +797,6 @@ main :: proc() {
 		PLATFORM.key_down_prev = PLATFORM.key_down_now
 		PLATFORM.mouse_button_down_prev = PLATFORM.mouse_button_down_now
 
-		world_unit :: 10.0
 
 		{
 			// Key actions
@@ -780,16 +815,19 @@ main :: proc() {
 				{glfw.KEY_E, {0, 0}, -1},
 			}
 
+			dv: [2]f32
+			dz: f32
 			for action in ACTIONS {
 				if is_key_down(action.key) {
-					camera.pos += action.dv * world_unit * 75 * delta / camera.zoom
-					camera.zoom *= 1.0 + action.dz * world_unit * delta * 0.25
-					camera.zoom = clamp(camera.zoom, 0.1, 20.0)
+					dv += action.dv
+					dz += action.dz
 				}
 			}
+			camera_pan(&camera, dv * 400 * delta)
+			camera_zoom_by(&camera, 1.0 + dz * 2.5 * delta)
 		}
 
-		draw_terrain(camera, world_unit)
+		draw_terrain(camera)
 
 		{
 			elements := translate_draw_commands(frame_arena, drawables)
