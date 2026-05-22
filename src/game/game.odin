@@ -113,7 +113,13 @@ SpriteMapping :: enum {
 	Wrap,
 }
 
+DrawableSpace :: enum {
+	World,
+	Ui,
+}
+
 Drawable :: struct {
+	space:            DrawableSpace,
 	bounds:           Rect,
 	color:            Rect_Gradient,
 	stroke:           Rect_Gradient,
@@ -123,11 +129,6 @@ Drawable :: struct {
 	sprite_mapping:   SpriteMapping,
 	sprite_intensity: f32,
 	text:             DrawableText,
-}
-
-Assets_Request :: struct {
-	sprites: []string,
-	fonts:   []string,
 }
 
 Asset_Id :: u32
@@ -173,17 +174,6 @@ init :: proc(
 	return world_keys
 }
 
-// Asks the game what assets it may need
-asset_request :: proc(alloc: mem.Allocator) -> Assets_Request {
-	sprites := make_dynamic_array([dynamic]string, alloc)
-	fonts := make_dynamic_array([dynamic]string, alloc)
-
-	append(&sprites, "quad", "widget")
-	append(&fonts, "default")
-
-	return Assets_Request{sprites = sprites[:], fonts = fonts[:]}
-}
-
 // Provide the assets to the game and start in full
 start :: proc(game: ^Game, assets: Assets) {
 	for sprite in assets.sprites {
@@ -204,6 +194,20 @@ show_ui := true
 
 update_and_render :: proc(arena: mem.Allocator, game: ^Game, input: Platform_Input) -> []Drawable {
 	draw_commands: [dynamic]Drawable = make([dynamic]Drawable, 0, 1024, allocator = arena)
+
+	{
+		pos: [2]f32 = {300, 250}
+		size: f32 = 2
+
+		drawable := Drawable {
+			space            = .World,
+			bounds           = {pos.x - size / 2, pos.y - size / 2, size, size},
+			sprite           = game.sprite_names["celtic_town"],
+			sprite_intensity = 1,
+			color            = WHITE,
+		}
+		append(&draw_commands, drawable)
+	}
 
 	{
 		base_color := color_rgba8(207, 185, 151, 255)

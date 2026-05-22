@@ -39,17 +39,23 @@ Vertex :: struct {
 VERTICES_MAX :: 1024
 INDICES_MAX :: 1024
 
+Sprite :: struct {
+	name:    string,
+	texture: Texture,
+	region:  [4]int,
+}
+
 GL: struct {
-	program:         u32,
-	vao:             u32,
-	vbo:             u32,
-	ebo:             u32,
-	vertices:        [dynamic; VERTICES_MAX]Vertex,
-	indices:         [dynamic; INDICES_MAX]u32,
-	sprite_textures: [dynamic; 1024]Texture,
-	fonts:           [dynamic; 32]FontData,
-	terrain_keys:    Texture,
-	terrain_atlas:   Texture,
+	program:       u32,
+	vao:           u32,
+	vbo:           u32,
+	ebo:           u32,
+	vertices:      [dynamic; VERTICES_MAX]Vertex,
+	indices:       [dynamic; INDICES_MAX]u32,
+	terrain_keys:  Texture,
+	terrain_atlas: Texture,
+	sprites:       [dynamic; 1024]Sprite,
+	fonts:         [dynamic; 32]FontData,
 }
 
 gl_init :: proc() {
@@ -229,7 +235,11 @@ measure_text :: proc(text: string, font: ^FontData, pixel_height: f32) -> TextMe
 	return out
 }
 
-translate_draw_commands :: proc(alloc: mem.Allocator, commands: []game.Drawable) -> []DrawCommand {
+translate_draw_commands :: proc(
+	alloc: mem.Allocator,
+	commands: []game.Drawable,
+	camera: Camera,
+) -> []DrawCommand {
 	out := make_dynamic_array_len_cap(
 		[dynamic]DrawCommand,
 		0,
@@ -237,24 +247,59 @@ translate_draw_commands :: proc(alloc: mem.Allocator, commands: []game.Drawable)
 		allocator = alloc,
 	)
 	for draw in commands {
-		if draw.bounds.w > 0 && draw.bounds.h > 0 {
-			texture := GL.sprite_textures[draw.sprite]
+		bounds := draw.bounds
 
-			uv: [4][2]f32 = ---
+		switch (draw.space) {
+		case .World:
+			// We need to map to world space
+			xy := camera_point_world_to_screen(camera, {bounds.x, bounds.y}, PLATFORM.window_size)
+			br := camera_point_world_to_screen(
+				camera,
+				{bounds.x + bounds.w, bounds.y + bounds.h},
+				PLATFORM.window_size,
+			)
+			bounds = game.Rect {
+				x = xy.x,
+				y = xy.y,
+				w = br.x - xy.x,
+				h = br.y - xy.y,
+			}
+		case .Ui:
+		}
+
+		if bounds.w > 0 && bounds.h > 0 {
+			sprite := GL.sprites[draw.sprite]
+			texture := sprite.texture
+
+			reg_pos := [2]f32{f32(sprite.region[0]), f32(sprite.region[1])}
+			reg_size := [2]f32{f32(sprite.region[2]), f32(sprite.region[3])}
+			reg_min := reg_pos / texture.size
+
+			st: [4][2]f32 = ---
 			switch (draw.sprite_mapping) {
 			case .Stretch:
-				uv = {{0, 0}, {1, 0}, {1, 1}, {0, 1}}
+				reg_max := (reg_pos + reg_size) / texture.size
+				st = {
+					{reg_min.x, reg_min.y},
+					{reg_max.x, reg_min.y},
+					{reg_max.x, reg_max.y},
+					{reg_min.x, reg_max.y},
+				}
 			case .Wrap:
-				w := draw.bounds.w / texture.size.x
-				h := draw.bounds.h / texture.size.y
-				uv = {{0, 0}, {w, 0}, {w, h}, {0, h}}
+				span := game.rect_size(bounds) / reg_size
+				st = {
+					{reg_min.x, reg_min.y},
+					{reg_min.x + span.x, reg_min.y},
+					{reg_min.x + span.x, reg_min.y + span.y},
+					{reg_min.x, reg_min.y + span.y},
+				}
 			}
 
 			elem := Element {
-				xy            = game.rect_corners(draw.bounds),
-				st            = uv,
+				xy            = game.rect_corners(bounds),
+				st            = st,
 				color         = draw.color,
-				size          = game.rect_size(draw.bounds),
+				size          = game.rect_size(bounds),
 				stroke        = draw.stroke,
 				thickness     = draw.thickness,
 				radius        = draw.radius,
@@ -290,14 +335,14 @@ translate_draw_commands :: proc(alloc: mem.Allocator, commands: []game.Drawable)
 					true,
 				)
 
-				pos: [2]f32 = {draw.bounds.x, draw.bounds.y}
+				pos: [2]f32 = {bounds.x, bounds.y}
 
 				switch (draw.text.pos) {
 				case .Center:
-					pos.x += (draw.bounds.w - measure.size.x) / 2
-					pos.y += draw.bounds.h / 2 + measure.baseline
+					pos.x += (bounds.w - measure.size.x) / 2
+					pos.y += bounds.h / 2 + measure.baseline
 				case .Left:
-					pos.y += draw.bounds.h / 2 + measure.baseline
+					pos.y += bounds.h / 2 + measure.baseline
 				case .Top_Left:
 				}
 
@@ -564,6 +609,17 @@ camera_point_screen_to_world :: proc(
 	return camera.pos + (screen_point_px - screen_center) * world_per_screen_px
 }
 
+camera_point_world_to_screen :: proc(
+	camera: Camera,
+	world_point: [2]f32,
+	viewport_size_px: [2]f32,
+) -> [2]f32 {
+	zoom := max(camera.zoom, 0.001)
+	screen_center := viewport_size_px * 0.5
+	screen_per_world_px := camera.world_to_px * zoom
+	return screen_center + (world_point - camera.pos) * screen_per_world_px
+}
+
 delta_screen_to_world :: proc(camera: Camera, screen_delta_px: [2]f32) -> [2]f32 {
 	zoom := max(camera.zoom, 0.001)
 	world_per_screen_px := 1.0 / (camera.world_to_px * zoom)
@@ -643,6 +699,45 @@ main :: proc() {
 
 	GL.terrain_atlas = load_texture_from_file("assets/terrain_types.png", .Linear)
 
+	{
+		names :: []string{"quad", "widget"}
+		for name in names {
+			path := strings.join({"assets/", name, ".png"}, "", frame_arena)
+			cpath := strings.clone_to_cstring(path, frame_arena)
+			texture := load_texture_from_file(cpath, Texture_Filter_Mode.Linear)
+			sprite := Sprite {
+				name    = name,
+				texture = texture,
+				region  = {0, 0, int(texture.size.x), int(texture.size.y)},
+			}
+			append(&GL.sprites, sprite)
+		}
+	}
+
+	{
+		// load atlas
+		atlas, loaded := sprite_atlas_load("assets/pawns.csv")
+		if loaded {
+			sprite_atlas_create("assets/pawns", "assets/pawns")
+			a, loaded := sprite_atlas_load("assets/pawns.csv")
+			if !loaded {
+				fmt.println("Failed to load sprite atlas")
+			}
+			atlas = a
+		}
+		texture_path := strings.clone_to_cstring(atlas.image_path)
+		texture := load_texture_from_file(texture_path, Texture_Filter_Mode.Linear)
+
+		for region in atlas.regions {
+			sprite: Sprite = {
+				name    = strings.clone(region.name, root_arena),
+				texture = texture,
+				region  = {region.x, region.y, region.w, region.h},
+			}
+			append(&GL.sprites, sprite)
+		}
+	}
+
 	game_state: game.Game
 
 	{
@@ -712,44 +807,29 @@ main :: proc() {
 	font := load_font_from_file("assets/fonts/default.ttf")
 
 	{
-		asset_reqs := game.asset_request(frame_arena)
 		assets: game.Assets
 
-		for name in asset_reqs.sprites {
-			path := strings.join({"assets/", name, ".png"}, "", frame_arena)
-			cpath := strings.clone_to_cstring(path, frame_arena)
-			texture := load_texture_from_file(cpath, .Linear)
-			id := len(GL.sprite_textures)
-			append(&GL.sprite_textures, texture)
-
-			sprites := make_dynamic_array_len_cap(
-				[dynamic]game.Asset_Def,
-				0,
-				len(asset_reqs.sprites),
-				frame_arena,
-			)
-
-			append(&sprites, game.Asset_Def{name = name, id = u32(id)})
-
-			assets.sprites = sprites[:]
+		sprites := make_dynamic_array_len_cap(
+			[dynamic]game.Asset_Def,
+			0,
+			len(GL.sprites),
+			frame_arena,
+		)
+		for sprite, idx in GL.sprites {
+			append(&sprites, game.Asset_Def{name = sprite.name, id = u32(idx)})
 		}
+		assets.sprites = sprites[:]
 
-		for name in asset_reqs.fonts {
+		names := []string{"default"}
+		fonts := make_dynamic_array_len_cap([dynamic]game.Asset_Def, 0, len(names), frame_arena)
+		for name in names {
 			path := strings.join({"assets/fonts/", name, ".ttf"}, "", frame_arena)
 			font := load_font_from_file(path)
 			id := len(GL.fonts)
 			append(&GL.fonts, font)
-
-			fonts := make_dynamic_array_len_cap(
-				[dynamic]game.Asset_Def,
-				0,
-				len(asset_reqs.fonts),
-				frame_arena,
-			)
-
 			append(&fonts, game.Asset_Def{name = name, id = u32(id)})
-			assets.fonts = fonts[:]
 		}
+		assets.fonts = fonts[:]
 
 		game.start(&game_state, assets)
 	}
@@ -830,7 +910,7 @@ main :: proc() {
 		draw_terrain(camera)
 
 		{
-			elements := translate_draw_commands(frame_arena, drawables)
+			elements := translate_draw_commands(frame_arena, drawables, camera)
 			batches := batch_draw_commands(frame_arena, elements)
 			for batch in batches {
 				draw_batch(batch)
@@ -1120,4 +1200,3 @@ load_font_from_file :: proc(path: string) -> FontData {
 	}
 	return out
 }
-

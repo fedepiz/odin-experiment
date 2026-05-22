@@ -297,6 +297,7 @@ ui_end :: proc() -> []Drawable {
 		ui_box.bounds.y = cursor.y
 
 		drawable := Drawable {
+			space = .Ui,
 			bounds = ui_box.bounds,
 			color = ui_box.fill,
 			sprite = ui_box.background,
