@@ -190,94 +190,102 @@ Platform_Input :: struct {
 	mouse_down:    bool,
 }
 
-show_ui := true
 
 update_and_render :: proc(arena: mem.Allocator, game: ^Game, input: Platform_Input) -> []Drawable {
-	draw_commands: [dynamic]Drawable = make([dynamic]Drawable, 0, 1024, allocator = arena)
+	drawables: [dynamic]Drawable = make([dynamic]Drawable, 0, 1024, allocator = arena)
 
-	{
-		pos: [2]f32 = {300, 250}
-		size: f32 = 2
+	draw_world(&drawables, game)
 
-		drawable := Drawable {
-			space            = .World,
-			bounds           = {pos.x - size / 2, pos.y - size / 2, size, size},
-			sprite           = game.sprite_names["celtic_town"],
-			sprite_intensity = 1,
-			color            = WHITE,
-		}
-		append(&draw_commands, drawable)
+	for command in build_ui(game, input) {
+		append(&drawables, command)
 	}
 
-	{
-		base_color := color_rgba8(207, 185, 151, 255)
-		// Basic
-		ui_set_style_number(.UnitW, 20)
-		ui_set_style_number(.UnitH, 20)
-		// Widget
-		ui_set_style_color(.WidgetBaseColor, base_color)
-		ui_set_style_color(.WidgetHoverColor, GREEN)
-		ui_set_style_color(.WidgetHeldColor, RED)
-		ui_set_style_color(.WidgetTextColor, BLACK)
-		ui_set_style_number(.WidgetTextSize, 26)
-		ui_set_style_color(.WidgetBorderColor, color_mix(base_color, BLACK, 0.5))
-		ui_set_style_number(.WidgetBorderRadius, 8)
-		ui_set_style_number(.WidgetBorderThickness, 5)
-		ui_set_style_number(.WidgetThinBorderThickness, 2)
-		ui_set_style_color(.ToggleOnColor, GREEN)
-		ui_set_style_color(.ToggleHoverColor, RED)
-		// Panels
-		ui_set_style_color(.PanelColor, base_color)
-		ui_set_style_color(.PanelBorderColor, color_mix(base_color, BLACK, 0.5))
-		ui_set_style_number(.PanelBorderRadius, 8)
-		ui_set_style_number(.PanelBorderThickness, 5)
+	return drawables[:]
+}
 
-		sprite := game.sprite_names["widget"]
-		ui_begin(input)
+show_ui := true
 
-		if show_ui {
-			ui_panel(.Vertical)
-			ui_box_set_background(sprite, 0.2)
+@(private = "file")
+draw_world :: proc(out: ^[dynamic]Drawable, game: ^Game) {
 
-			ui_vspace()
+	pos: [2]f32 = {300, 250}
+	size: f32 = 2
 
-			{
-				ui_row()
-				ui_heading("This is a heading!", 16)
-				show_ui = !ui_toggle("###CLOSE", false)
-				ui_hspace()
-			}
+	drawable := Drawable {
+		space            = .World,
+		bounds           = {pos.x - size / 2, pos.y - size / 2, size, size},
+		sprite           = game.sprite_names["celtic_town"],
+		sprite_intensity = 1,
+		color            = WHITE,
+	}
+	append(out, drawable)
+}
 
+@(private = "file")
+build_ui :: proc(game: ^Game, input: Platform_Input) -> []Drawable {
+	base_color := color_rgba8(207, 185, 151, 255)
+	// Basic
+	ui_set_style_number(.UnitW, 20)
+	ui_set_style_number(.UnitH, 20)
+	// Widget
+	ui_set_style_color(.WidgetBaseColor, base_color)
+	ui_set_style_color(.WidgetHoverColor, GREEN)
+	ui_set_style_color(.WidgetHeldColor, RED)
+	ui_set_style_color(.WidgetTextColor, BLACK)
+	ui_set_style_number(.WidgetTextSize, 26)
+	ui_set_style_color(.WidgetBorderColor, color_mix(base_color, BLACK, 0.5))
+	ui_set_style_number(.WidgetBorderRadius, 8)
+	ui_set_style_number(.WidgetBorderThickness, 5)
+	ui_set_style_number(.WidgetThinBorderThickness, 2)
+	ui_set_style_color(.ToggleOnColor, GREEN)
+	ui_set_style_color(.ToggleHoverColor, RED)
+	// Panels
+	ui_set_style_color(.PanelColor, base_color)
+	ui_set_style_color(.PanelBorderColor, color_mix(base_color, BLACK, 0.5))
+	ui_set_style_number(.PanelBorderRadius, 8)
+	ui_set_style_number(.PanelBorderThickness, 5)
 
-			{
-				ui_row()
-				ui_hspace()
-				if ui_button("Hello", 6) {
-					fmt.println("Hello")
-				}
-				ui_hspace()
-			}
+	sprite := game.sprite_names["widget"]
+	ui_begin(input)
 
-			ui_vspace()
+	if show_ui {
+		ui_panel(.Vertical)
+		ui_box_set_background(sprite, 0.2)
 
-			{
-				ui_row()
-				ui_hspace()
-				if ui_button("Goodbye", 6) {
-					fmt.println("Goodbye")
-				}
-				ui_hspace()
-			}
+		ui_vspace()
 
-			ui_vspace()
+		{
+			ui_row()
+			ui_heading("This is a heading!", 16)
+			show_ui = !ui_toggle("###CLOSE", false)
+			ui_hspace()
 		}
 
-		commands := ui_end()
-		for command in commands {
-			append(&draw_commands, command)
+
+		{
+			ui_row()
+			ui_hspace()
+			if ui_button("Hello", 6) {
+				fmt.println("Hello")
+			}
+			ui_hspace()
 		}
+
+		ui_vspace()
+
+		{
+			ui_row()
+			ui_hspace()
+			if ui_button("Goodbye", 6) {
+				fmt.println("Goodbye")
+			}
+			ui_hspace()
+		}
+
+		ui_vspace()
 	}
 
-	return draw_commands[:]
+	return ui_end()
+
 }
 

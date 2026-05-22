@@ -700,6 +700,7 @@ main :: proc() {
 	GL.terrain_atlas = load_texture_from_file("assets/terrain_types.png", .Linear)
 
 	{
+		// Fixed extures
 		names :: []string{"quad", "widget"}
 		for name in names {
 			path := strings.join({"assets/", name, ".png"}, "", frame_arena)
@@ -715,7 +716,7 @@ main :: proc() {
 	}
 
 	{
-		// load atlas
+		// Pawn atlas preparation
 		atlas, loaded := sprite_atlas_load("assets/pawns.csv")
 		if loaded {
 			sprite_atlas_create("assets/pawns", "assets/pawns")
@@ -741,8 +742,7 @@ main :: proc() {
 	game_state: game.Game
 
 	{
-
-
+		// Prepare the terrain
 		terrain_types: csv.Table
 		{
 			source, err := os.read_entire_file("data/terrain_types.csv", frame_arena)
@@ -771,6 +771,7 @@ main :: proc() {
 			}
 		}
 
+		// Initialise the game
 		world_map_keys := game.init(
 			root_arena,
 			frame_arena,
@@ -804,11 +805,11 @@ main :: proc() {
 		}
 	}
 
-	font := load_font_from_file("assets/fonts/default.ttf")
-
 	{
+		// Load game assets and start te game
 		assets: game.Assets
 
+		// Prepare sprites
 		sprites := make_dynamic_array_len_cap(
 			[dynamic]game.Asset_Def,
 			0,
@@ -820,6 +821,7 @@ main :: proc() {
 		}
 		assets.sprites = sprites[:]
 
+		// Prepare fonts
 		names := []string{"default"}
 		fonts := make_dynamic_array_len_cap([dynamic]game.Asset_Def, 0, len(names), frame_arena)
 		for name in names {
@@ -833,7 +835,6 @@ main :: proc() {
 
 		game.start(&game_state, assets)
 	}
-
 
 	camera: Camera
 	camera.world_to_px = 10.0
@@ -1200,3 +1201,4 @@ load_font_from_file :: proc(path: string) -> FontData {
 	}
 	return out
 }
+
