@@ -42,7 +42,6 @@ NumElements :: 1024
 UI: struct {
 	boxes:      [dynamic; NumElements]Ui_Box,
 	active:     ^Ui_Box,
-	drawables:  [dynamic; NumElements]Drawable,
 	caches:     [2]map[Ui_Key]Ui_Cache,
 	tick_num:   u64,
 	global_sig: Ui_GlobalSignals,
@@ -241,11 +240,10 @@ ui_begin :: proc(input: Platform_Input) {
 	UI.tick_num += 1
 }
 
-ui_end :: proc() -> []Drawable {
+ui_end :: proc(drawables: ^[dynamic; 2048]Drawable) {
 	if UI.active != nil {
 		fmt.printfln("ERROR: ui_end detected unclosed ui_box")
 	}
-	clear(&UI.drawables)
 
 	// Calculate sizes
 	for axis in Axis {
@@ -284,13 +282,11 @@ ui_end :: proc() -> []Drawable {
 		}
 
 		cursor: V2 = {0, 0}
-		layout_rec(&ui_box, cursor)
+		layout_rec(drawables, &ui_box, cursor)
 	}
 
-	return UI.drawables[:]
-
 	// Layout recursive
-	layout_rec :: proc(ui_box: ^Ui_Box, cursor: V2) {
+	layout_rec :: proc(drawables: ^[dynamic; 2048]Drawable, ui_box: ^Ui_Box, cursor: V2) {
 		cursor := cursor
 
 		ui_box.bounds.x = cursor.x
@@ -315,13 +311,13 @@ ui_end :: proc() -> []Drawable {
 			},
 		}
 
-		append(&UI.drawables, drawable)
+		append(drawables, drawable)
 
 
 		for child := ui_box.first_child; child != nil; child = child.sibling {
 			centering :=
 				(rect_size(ui_box.bounds) - rect_size(child.bounds)) / 2 * ui_box.center_axis
-			layout_rec(child, cursor + centering)
+			layout_rec(drawables, child, cursor + centering)
 			cursor += rect_size(child.bounds) * ui_box.growth_axis
 		}
 	}

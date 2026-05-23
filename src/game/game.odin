@@ -47,6 +47,12 @@ color_rgba8 :: proc(r, g, b, a: u8) -> Color {
 	return cast([4]f32)(vec) / 255
 }
 
+color_with_alpha :: proc(c: Color, a: f32) -> Color {
+	c := c
+	c.a = a
+	return c
+}
+
 color_mix :: proc(c1: Color, c2: Color, t: f32) -> Color {
 	t := clamp(t, 0, 1)
 	// Lerp every colour
@@ -56,6 +62,7 @@ color_mix :: proc(c1: Color, c2: Color, t: f32) -> Color {
 	return result
 }
 
+TRANSPARENT: Color = {}
 WHITE: Color = {1, 1, 1, 1}
 BLACK: Color = {0, 0, 0, 1}
 RED: Color = {1, 0, 0, 1}
@@ -67,6 +74,7 @@ Game :: struct {
 	sprite_names:     map[string]Asset_Id,
 	font_names:       map[string]Asset_Id,
 	world_map:        World_Map,
+	drawables:        [dynamic; 2048]Drawable,
 }
 
 Rect_Gradient :: [4]Color
@@ -97,6 +105,7 @@ rect_gradient_shaded :: proc(
 DrawTextPos :: enum {
 	Center,
 	Left,
+	Top_Center,
 	Top_Left,
 }
 
@@ -106,6 +115,8 @@ DrawableText :: struct {
 	pixel_height: f32,
 	color:        Color,
 	pos:          DrawTextPos,
+	background:   Color,
+	padding:      [2]f32,
 }
 
 SpriteMapping :: enum {
@@ -192,37 +203,66 @@ Platform_Input :: struct {
 
 
 update_and_render :: proc(arena: mem.Allocator, game: ^Game, input: Platform_Input) -> []Drawable {
-	drawables: [dynamic]Drawable = make([dynamic]Drawable, 0, 1024, allocator = arena)
+	clear(&game.drawables)
 
-	draw_world(&drawables, game)
+	draw_world(game)
 
-	for command in build_ui(game, input) {
-		append(&drawables, command)
-	}
+	build_ui(game, input)
 
-	return drawables[:]
+	return game.drawables[:]
 }
 
 show_ui := true
 
 @(private = "file")
-draw_world :: proc(out: ^[dynamic]Drawable, game: ^Game) {
-
-	pos: [2]f32 = {300, 250}
-	size: f32 = 2
-
-	drawable := Drawable {
-		space            = .World,
-		bounds           = {pos.x - size / 2, pos.y - size / 2, size, size},
-		sprite           = game.sprite_names["celtic_town"],
-		sprite_intensity = 1,
-		color            = WHITE,
+draw_world :: proc(game: ^Game) {
+	Entity :: struct {
+		name:   string,
+		sprite: string,
+		pos:    [2]f32,
+		size:   f32,
 	}
-	append(out, drawable)
+
+	entities: []Entity = {
+		{name = "Caer Ligualid", sprite = "celtic_town", pos = {300, 254}, size = 3},
+		{name = "Anava", sprite = "celtic_village", pos = {302, 248}, size = 2},
+	}
+
+	for entity in entities {
+		pos := entity.pos
+		size := entity.size
+		sprite := game.sprite_names[entity.sprite]
+
+		drawable: Drawable
+
+		drawable = Drawable {
+			space            = .World,
+			bounds           = {pos.x - size / 2, pos.y - size / 2, size, size},
+			sprite           = sprite,
+			sprite_intensity = 1,
+			color            = WHITE,
+		}
+		append(&game.drawables, drawable)
+
+		drawable = Drawable {
+			space = .World,
+			bounds = {pos.x, pos.y + size / 2 + 0.25, 0, 0},
+			text = DrawableText {
+				content = entity.name,
+				font = 0,
+				pixel_height = 24,
+				color = WHITE,
+				pos = .Center,
+				background = color_with_alpha(BLACK, 0.5),
+				padding = 4,
+			},
+		}
+		append(&game.drawables, drawable)
+	}
 }
 
 @(private = "file")
-build_ui :: proc(game: ^Game, input: Platform_Input) -> []Drawable {
+build_ui :: proc(game: ^Game, input: Platform_Input) {
 	base_color := color_rgba8(207, 185, 151, 255)
 	// Basic
 	ui_set_style_number(.UnitW, 20)
@@ -285,7 +325,6 @@ build_ui :: proc(game: ^Game, input: Platform_Input) -> []Drawable {
 		ui_vspace()
 	}
 
-	return ui_end()
-
+	ui_end(&game.drawables)
 }
 

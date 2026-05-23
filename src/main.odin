@@ -267,6 +267,7 @@ translate_draw_commands :: proc(
 		case .Ui:
 		}
 
+		// Draw the sprite, if there is any
 		if bounds.w > 0 && bounds.h > 0 {
 			sprite := GL.sprites[draw.sprite]
 			texture := sprite.texture
@@ -308,61 +309,86 @@ translate_draw_commands :: proc(
 			append(&out, DrawCommand{element = elem, texture = texture})
 		}
 
+		// Draw text, if present
 		if len(draw.text.content) > 0 {
 			font := &GL.fonts[draw.text.font]
 			scale: f32 = f32(draw.text.pixel_height) / f32(font.pixel_height)
 			measure := measure_text(draw.text.content, font, draw.text.pixel_height)
-			pen: [2]f32
 
-			for char in draw.text.content {
-				q: stbtt.aligned_quad
-				glyph := i32(char)
+			pos: [2]f32 = {bounds.x, bounds.y}
 
-				if (glyph >= font.min_glyph && glyph < font.max_glyph) {
-					glyph -= font.min_glyph
-				} else {
-					glyph = 0
-				}
+			switch (draw.text.pos) {
+			case .Center:
+				pos.x += (bounds.w - measure.size.x) / 2
+				pos.y += bounds.h / 2 + measure.baseline
+			case .Top_Center:
+				pos.x += (bounds.w - measure.size.x) / 2
+			case .Left:
+				pos.y += bounds.h / 2 + measure.baseline
+			case .Top_Left:
 
-				stbtt.GetBakedQuad(
-					raw_data(font.cdata[:]),
-					512,
-					512,
-					glyph,
-					&pen.x,
-					&pen.y,
-					&q,
-					true,
-				)
+			}
 
-				pos: [2]f32 = {bounds.x, bounds.y}
-
-				switch (draw.text.pos) {
-				case .Center:
-					pos.x += (bounds.w - measure.size.x) / 2
-					pos.y += bounds.h / 2 + measure.baseline
-				case .Left:
-					pos.y += bounds.h / 2 + measure.baseline
-				case .Top_Left:
-				}
-
-
+			// Draw the text background box
+			if draw.text.background.a > 0 {
+				pos := pos - {0, measure.baseline} - {0, 0.5} * measure.size - draw.text.padding
+				size := measure.size + draw.text.padding * 2
 				element := Element {
 					xy            = {
-						{pos.x + q.x0 * scale, pos.y + q.y0 * scale},
-						{pos.x + q.x1 * scale, pos.y + q.y0 * scale},
-						{pos.x + q.x1 * scale, pos.y + q.y1 * scale},
-						{pos.x + q.x0 * scale, pos.y + q.y1 * scale},
+						{pos.x, pos.y},
+						{pos.x + size.x, pos.y},
+						{pos.x + size.x, pos.y + size.y},
+						{pos.x, pos.y + size.y},
 					},
-					st            = {{q.s0, q.t0}, {q.s1, q.t0}, {q.s1, q.t1}, {q.s0, q.t1}},
-					color         = draw.text.color,
-					size          = {q.x1 - q.x0, q.y1 - q.y0},
-					tex_intensity = 1,
+					size          = size,
+					st            = {{0, 0}, {1, 0}, {1, 1}, {0, 1}},
+					color         = draw.text.background,
+					tex_intensity = 0,
 				}
 				append(&out, DrawCommand{element = element, texture = font.texture})
 			}
-		}
 
+			// Draw the letters one by one
+			if draw.text.color.a > 0 {
+				pen: [2]f32
+
+				for char in draw.text.content {
+					q: stbtt.aligned_quad
+					glyph := i32(char)
+
+					if (glyph >= font.min_glyph && glyph < font.max_glyph) {
+						glyph -= font.min_glyph
+					} else {
+						glyph = 0
+					}
+
+					stbtt.GetBakedQuad(
+						raw_data(font.cdata[:]),
+						512,
+						512,
+						glyph,
+						&pen.x,
+						&pen.y,
+						&q,
+						true,
+					)
+
+					element := Element {
+						xy            = {
+							{pos.x + q.x0 * scale, pos.y + q.y0 * scale},
+							{pos.x + q.x1 * scale, pos.y + q.y0 * scale},
+							{pos.x + q.x1 * scale, pos.y + q.y1 * scale},
+							{pos.x + q.x0 * scale, pos.y + q.y1 * scale},
+						},
+						st            = {{q.s0, q.t0}, {q.s1, q.t0}, {q.s1, q.t1}, {q.s0, q.t1}},
+						color         = draw.text.color,
+						size          = {q.x1 - q.x0, q.y1 - q.y0},
+						tex_intensity = 1,
+					}
+					append(&out, DrawCommand{element = element, texture = font.texture})
+				}
+			}
+		}
 	}
 	return out[:]
 }
@@ -739,7 +765,7 @@ main :: proc() {
 		}
 	}
 
-	game_state: game.Game
+	game_state, _ := mem.new(game.Game, root_arena)
 
 	{
 		// Prepare the terrain
@@ -775,7 +801,7 @@ main :: proc() {
 		world_map_keys := game.init(
 			root_arena,
 			frame_arena,
-			&game_state,
+			game_state,
 			game.Init_Params{terrain_types, heightmap},
 		)
 
@@ -833,7 +859,7 @@ main :: proc() {
 		}
 		assets.fonts = fonts[:]
 
-		game.start(&game_state, assets)
+		game.start(game_state, assets)
 	}
 
 	camera: Camera
@@ -872,7 +898,7 @@ main :: proc() {
 			mouse_down    = is_button_down(glfw.MOUSE_BUTTON_LEFT),
 		}
 
-		drawables := game.update_and_render(frame_arena, &game_state, input)
+		drawables := game.update_and_render(frame_arena, game_state, input)
 
 		// end of frame
 		PLATFORM.key_down_prev = PLATFORM.key_down_now
