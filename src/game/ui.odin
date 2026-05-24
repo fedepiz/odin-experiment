@@ -4,6 +4,7 @@ import "core:fmt"
 import "core:hash"
 import "core:mem"
 
+
 Logical_Size_Kind :: enum {
 	Pixels,
 	SumOfChildren,
@@ -37,6 +38,7 @@ Ui_Key :: u64
 
 @(private = "file")
 NumElements :: 1024
+
 
 @(private = "file")
 UI: struct {
@@ -240,7 +242,7 @@ ui_begin :: proc(input: Platform_Input) {
 	UI.tick_num += 1
 }
 
-ui_end :: proc(drawables: ^[dynamic; 2048]Drawable) {
+ui_end :: proc(drawables: ^[dynamic;]Drawable) {
 	if UI.active != nil {
 		fmt.printfln("ERROR: ui_end detected unclosed ui_box")
 	}
@@ -286,7 +288,7 @@ ui_end :: proc(drawables: ^[dynamic; 2048]Drawable) {
 	}
 
 	// Layout recursive
-	layout_rec :: proc(drawables: ^[dynamic; 2048]Drawable, ui_box: ^Ui_Box, cursor: V2) {
+	layout_rec :: proc(drawables: ^[dynamic]Drawable, ui_box: ^Ui_Box, cursor: V2) {
 		cursor := cursor
 
 		ui_box.bounds.x = cursor.x
@@ -533,6 +535,19 @@ ui_button :: proc(text: string, width: f32) -> bool {
 	}
 
 	return sig.is_clicked
+}
+
+ui_label :: proc(text: string, width: f32) {
+	ui_box_begin()
+	defer ui_box_end()
+
+	unit_size := ui_get_unit_size()
+
+	text_color := ui_get_style_var(.WidgetTextColor).color
+	pixel_height := ui_get_style_var(.WidgetTextSize).num
+
+	ui_box_set_text(text, text_color, pixel_height)
+	ui_box_pixel_size({width, 2} * unit_size)
 }
 
 @(deferred_none = ui_box_end)

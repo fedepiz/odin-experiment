@@ -897,6 +897,7 @@ main :: proc() {
 			mouse_pos     = PLATFORM.mouse_pos,
 			mouse_clicked = is_button_pressed(glfw.MOUSE_BUTTON_LEFT),
 			mouse_down    = is_button_down(glfw.MOUSE_BUTTON_LEFT),
+			fps           = fps,
 		}
 
 		drawables := game.update_and_render(frame_arena, game_state, input)

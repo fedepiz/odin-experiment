@@ -81,37 +81,12 @@ GameStaticMemory :: struct {
 }
 
 Game :: struct {
-	static_memory: GameStaticMemory,
-	sprite_names:  map[string]Asset_Id,
-	font_names:    map[string]Asset_Id,
-	world_map:     World_Map,
-	drawables:     [dynamic; 2048]Drawable,
-	tick_num:      u64,
-	things:        Things,
-}
-
-ThingId :: struct {
-	idx:        u16,
-	generation: u16,
-}
-
-thing_id_is_valid :: proc(id: ThingId) -> bool {
-	return id.idx > 0 && id.generation % 2 == 1
-}
-
-Thing :: struct {
-	id:     ThingId,
-	name:   string,
-	sprite: string,
-	pos:    [2]f32,
-	size:   f32,
-}
-
-
-Things :: struct {
-	blobs:   [2][BLOB_SIZE_MB * 1_000_000]byte,
-	arenas:  [2]mem.Arena,
-	entries: [2][NUM_THINGS]Thing,
+	static_memory:   GameStaticMemory,
+	sprites_by_name: map[string]Asset_Id,
+	font_names:      map[string]Asset_Id,
+	world_map:       World_Map,
+	tick_num:        u64,
+	things:          Things,
 }
 
 Rect_Gradient :: [4]Color
@@ -207,7 +182,7 @@ init :: proc(
 	mem.arena_init(&game.static_memory.arena, game.static_memory.buffer[:])
 	game.static_memory.alloc = mem.arena_allocator(&game.static_memory.arena)
 	// Initialize the sprite map
-	game.sprite_names = make_map(map[string]Asset_Id, game.static_memory.alloc)
+	game.sprites_by_name = make_map(map[string]Asset_Id, game.static_memory.alloc)
 	game.font_names = make_map(map[string]Asset_Id, game.static_memory.alloc)
 
 	world_map, world_keys := load_world_map(
@@ -228,109 +203,66 @@ init :: proc(
 		mem.arena_init(&game.things.arenas[i], game.things.blobs[i][:])
 	}
 
-	init_things(game)
-
 	return world_keys
-}
-
-Pass :: struct {
-	alloc: mem.Allocator,
-	old:   []Thing,
-	new:   []Thing,
-}
-
-make_pass :: proc(game: ^Game) -> Pass {
-	out: Pass
-	active_idx := game.tick_num % 2
-	arena := &game.things.arenas[active_idx]
-	mem.arena_free_all(arena)
-	out.alloc = mem.arena_allocator(arena)
-	out.new = game.things.entries[active_idx][:]
-	out.old = game.things.entries[1 - active_idx][:]
-	return out
 }
 
 // Provide the assets to the game and start in full
 start :: proc(game: ^Game, assets: Assets) {
 	for sprite in assets.sprites {
-		map_insert(&game.sprite_names, sprite.name, sprite.id)
+		map_insert(&game.sprites_by_name, sprite.name, sprite.id)
 	}
 	for font in assets.fonts {
 		map_insert(&game.font_names, font.name, font.id)
 	}
+
+	things_init(game)
 }
 
 Platform_Input :: struct {
 	mouse_pos:     V2,
 	mouse_clicked: bool,
 	mouse_down:    bool,
+	fps:           f32,
 }
-
 
 update_and_render :: proc(arena: mem.Allocator, game: ^Game, input: Platform_Input) -> []Drawable {
-	clear(&game.drawables)
-	draw_world(game)
+	tick(game)
 
-	build_ui(game, input)
+	drawables: [dynamic]Drawable = make_dynamic_array_len_cap([dynamic]Drawable, 0, 4096, arena)
+	draw_world(game, &drawables)
 
-	return game.drawables[:]
-}
+	build_ui(arena, game, input, &drawables)
 
-init_things :: proc(game: ^Game) {
-	Entity :: struct {
-		name:   string,
-		sprite: string,
-		pos:    [2]f32,
-		size:   f32,
-	}
-
-	entities: []Entity = {
-		{name = "Caer Ligualid", sprite = "celtic_town", pos = {300, 254}, size = 3},
-		{name = "Anava", sprite = "celtic_village", pos = {302, 248}, size = 2},
-	}
-
-	pass := make_pass(game)
-
-	for entity, idx in entities {
-		thing := &pass.new[idx + 1]
-		thing.id.generation += 1
-		assert(thing_id_is_valid(thing.id))
-
-		thing.name = strings.clone(entity.name, pass.alloc)
-		thing.sprite = strings.clone(entity.sprite, pass.alloc)
-		thing.pos = entity.pos
-		thing.size = entity.size
-	}
+	return drawables[:]
 }
 
 show_ui := true
 
 @(private = "file")
-draw_world :: proc(game: ^Game) {
+draw_world :: proc(game: ^Game, drawables: ^[dynamic]Drawable) {
 	actve_idx := game.tick_num % 2
-	for &thing in game.things.entries[actve_idx][1:] {
-		if !thing_id_is_valid(thing.id) {continue}
+	for &this in game.things.entries[actve_idx][1:] {
+		if !thing_id_is_valid(this.id) {continue}
 
-		pos := thing.pos
-		size := thing.size
-		sprite := game.sprite_names[thing.sprite]
+		pos := this.pos
+		size := this.size
 
 		drawable: Drawable
 
 		drawable = Drawable {
 			space            = .World,
 			bounds           = {pos.x - size / 2, pos.y - size / 2, size, size},
-			sprite           = sprite,
+			sprite           = this.sprite,
 			sprite_intensity = 1,
 			color            = WHITE,
 		}
-		append(&game.drawables, drawable)
+		append(drawables, drawable)
 
 		drawable = Drawable {
 			space = .World,
 			bounds = {pos.x, pos.y + size / 2 + 0.25, 0, 0},
 			text = DrawableText {
-				content = thing.name,
+				content = this.name,
 				font = 0,
 				pixel_height = 24,
 				color = WHITE,
@@ -339,12 +271,17 @@ draw_world :: proc(game: ^Game) {
 				padding = 4,
 			},
 		}
-		append(&game.drawables, drawable)
+		append(drawables, drawable)
 	}
 }
 
 @(private = "file")
-build_ui :: proc(game: ^Game, input: Platform_Input) {
+build_ui :: proc(
+	arena: mem.Allocator,
+	game: ^Game,
+	input: Platform_Input,
+	drawables: ^[dynamic]Drawable,
+) {
 	base_color := color_rgba8(207, 185, 151, 255)
 	// Basic
 	ui_set_style_number(.UnitW, 20)
@@ -367,7 +304,7 @@ build_ui :: proc(game: ^Game, input: Platform_Input) {
 	ui_set_style_number(.PanelBorderRadius, 8)
 	ui_set_style_number(.PanelBorderThickness, 5)
 
-	sprite := game.sprite_names["widget"]
+	sprite := game.sprites_by_name["widget"]
 	ui_begin(input)
 
 	if show_ui {
@@ -404,9 +341,21 @@ build_ui :: proc(game: ^Game, input: Platform_Input) {
 			ui_hspace()
 		}
 
+		// ui_vspace()
+
+		// {
+		// 	ui_row()
+		// 	ui_hspace()
+		// 	sb := strings.builder_make(arena)
+		// 	fmt.sbprintf(&sb, "FPS: %d", int(input.fps))
+		// 	text := strings.to_string(sb)
+		// 	ui_label(text, 6)
+		// 	ui_hspace()
+		// }
+
 		ui_vspace()
 	}
 
-	ui_end(&game.drawables)
+	ui_end(drawables)
 }
 
