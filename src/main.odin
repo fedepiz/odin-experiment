@@ -265,6 +265,7 @@ translate_draw_commands :: proc(
 				h = br.y - xy.y,
 			}
 		case .Ui:
+		// Nothing
 		}
 
 		// Draw the sprite, if there is any

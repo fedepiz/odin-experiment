@@ -3,6 +3,7 @@ package game
 import "../csv"
 import "core:fmt"
 import "core:mem"
+import "core:strings"
 V2 :: [2]f32
 
 Rect :: struct {
@@ -69,12 +70,48 @@ RED: Color = {1, 0, 0, 1}
 GREEN: Color = {0, 1, 0, 1}
 BLUE: Color = {0, 0, 1, 1}
 
+NUM_THINGS :: 32000
+STATIC_SIZE_MB :: 10
+BLOB_SIZE_MB :: 10
+
+GameStaticMemory :: struct {
+	buffer: [10 * 1_000_000]byte,
+	arena:  mem.Arena,
+	alloc:  mem.Allocator,
+}
+
 Game :: struct {
-	long_lived_arena: mem.Arena,
-	sprite_names:     map[string]Asset_Id,
-	font_names:       map[string]Asset_Id,
-	world_map:        World_Map,
-	drawables:        [dynamic; 2048]Drawable,
+	static_memory: GameStaticMemory,
+	sprite_names:  map[string]Asset_Id,
+	font_names:    map[string]Asset_Id,
+	world_map:     World_Map,
+	drawables:     [dynamic; 2048]Drawable,
+	tick_num:      u64,
+	things:        Things,
+}
+
+ThingId :: struct {
+	idx:        u16,
+	generation: u16,
+}
+
+thing_id_is_valid :: proc(id: ThingId) -> bool {
+	return id.idx > 0 && id.generation % 2 == 1
+}
+
+Thing :: struct {
+	id:     ThingId,
+	name:   string,
+	sprite: string,
+	pos:    [2]f32,
+	size:   f32,
+}
+
+
+Things :: struct {
+	blobs:   [2][BLOB_SIZE_MB * 1_000_000]byte,
+	arenas:  [2]mem.Arena,
+	entries: [2][NUM_THINGS]Thing,
 }
 
 Rect_Gradient :: [4]Color
@@ -166,15 +203,15 @@ init :: proc(
 	game: ^Game,
 	params: Init_Params,
 ) -> World_Map_Tile_Keys {
-	bytes, _ := mem.alloc_bytes_non_zeroed(10_000_000, allocator = long_alloc)
-	mem.arena_init(&game.long_lived_arena, bytes)
-	long_lived_alloc := mem.arena_allocator(&game.long_lived_arena)
+	// Initialize arena
+	mem.arena_init(&game.static_memory.arena, game.static_memory.buffer[:])
+	game.static_memory.alloc = mem.arena_allocator(&game.static_memory.arena)
 	// Initialize the sprite map
-	game.sprite_names = make_map(map[string]Asset_Id, long_lived_alloc)
-	game.font_names = make_map(map[string]Asset_Id, long_lived_alloc)
+	game.sprite_names = make_map(map[string]Asset_Id, game.static_memory.alloc)
+	game.font_names = make_map(map[string]Asset_Id, game.static_memory.alloc)
 
 	world_map, world_keys := load_world_map(
-		long_alloc,
+		game.static_memory.alloc,
 		short_alloc,
 		params.terrain_types,
 		params.heightmap,
@@ -182,7 +219,35 @@ init :: proc(
 
 	game.world_map = world_map
 
+	// Initialize things
+	for &thing, idx in game.things.entries[0] {
+		thing.id = ThingId{u16(idx), 0}
+	}
+	game.things.entries[1] = game.things.entries[0]
+	for i in 0 ..< 2 {
+		mem.arena_init(&game.things.arenas[i], game.things.blobs[i][:])
+	}
+
+	init_things(game)
+
 	return world_keys
+}
+
+Pass :: struct {
+	alloc: mem.Allocator,
+	old:   []Thing,
+	new:   []Thing,
+}
+
+make_pass :: proc(game: ^Game) -> Pass {
+	out: Pass
+	active_idx := game.tick_num % 2
+	arena := &game.things.arenas[active_idx]
+	mem.arena_free_all(arena)
+	out.alloc = mem.arena_allocator(arena)
+	out.new = game.things.entries[active_idx][:]
+	out.old = game.things.entries[1 - active_idx][:]
+	return out
 }
 
 // Provide the assets to the game and start in full
@@ -204,7 +269,6 @@ Platform_Input :: struct {
 
 update_and_render :: proc(arena: mem.Allocator, game: ^Game, input: Platform_Input) -> []Drawable {
 	clear(&game.drawables)
-
 	draw_world(game)
 
 	build_ui(game, input)
@@ -212,10 +276,7 @@ update_and_render :: proc(arena: mem.Allocator, game: ^Game, input: Platform_Inp
 	return game.drawables[:]
 }
 
-show_ui := true
-
-@(private = "file")
-draw_world :: proc(game: ^Game) {
+init_things :: proc(game: ^Game) {
 	Entity :: struct {
 		name:   string,
 		sprite: string,
@@ -228,10 +289,31 @@ draw_world :: proc(game: ^Game) {
 		{name = "Anava", sprite = "celtic_village", pos = {302, 248}, size = 2},
 	}
 
-	for entity in entities {
-		pos := entity.pos
-		size := entity.size
-		sprite := game.sprite_names[entity.sprite]
+	pass := make_pass(game)
+
+	for entity, idx in entities {
+		thing := &pass.new[idx + 1]
+		thing.id.generation += 1
+		assert(thing_id_is_valid(thing.id))
+
+		thing.name = strings.clone(entity.name, pass.alloc)
+		thing.sprite = strings.clone(entity.sprite, pass.alloc)
+		thing.pos = entity.pos
+		thing.size = entity.size
+	}
+}
+
+show_ui := true
+
+@(private = "file")
+draw_world :: proc(game: ^Game) {
+	actve_idx := game.tick_num % 2
+	for &thing in game.things.entries[actve_idx][1:] {
+		if !thing_id_is_valid(thing.id) {continue}
+
+		pos := thing.pos
+		size := thing.size
+		sprite := game.sprite_names[thing.sprite]
 
 		drawable: Drawable
 
@@ -248,7 +330,7 @@ draw_world :: proc(game: ^Game) {
 			space = .World,
 			bounds = {pos.x, pos.y + size / 2 + 0.25, 0, 0},
 			text = DrawableText {
-				content = entity.name,
+				content = thing.name,
 				font = 0,
 				pixel_height = 24,
 				color = WHITE,
