@@ -52,6 +52,7 @@ UI: struct {
 
 @(private = "file")
 Ui_GlobalSignals :: struct {
+	is_mouse_over_area: bool,
 	hovered_key: Ui_Key,
 	clicked_key: Ui_Key,
 	held_key:    Ui_Key,
@@ -215,10 +216,12 @@ ui_begin :: proc(input: Platform_Input) {
 	hovered: Ui_Key
 
 	for &ui_box in UI.boxes {
-		if ui_box.key == 0 do continue
+		// Skip if id is zero and we already detected the mouse to be over the area
+		if ui_box.key == 0 && UI.global_sig.is_mouse_over_area do continue
 		cache: Ui_Cache
 		// Is the pointer over this item?
-		if rect_contains_point(ui_box.bounds, input.mouse_pos) {
+		if rect_contains_point(ui_box.bounds, input.mouse_pos_screen) {
+			UI.global_sig.is_mouse_over_area = true
 			hovered = ui_box.key
 		}
 		// Populate the cache
@@ -581,3 +584,6 @@ ui_col :: proc() {
 	ui_box_set_layout(Axis.Vertical)
 }
 
+ui_is_mouse_over_area:: proc() -> bool {
+	return UI.global_sig.is_mouse_over_area
+}

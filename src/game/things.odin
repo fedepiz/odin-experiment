@@ -4,14 +4,16 @@ package game
 import "core:mem"
 import "core:strings"
 
+thing_id_is_valid :: proc(id: ThingId) -> bool {
+	return id.idx > 0 && id.generation % 2 == 1
+}
+
 ThingId :: struct {
 	idx:        u16,
 	generation: u16,
 }
 
-thing_id_is_valid :: proc(id: ThingId) -> bool {
-	return id.idx > 0 && id.generation % 2 == 1
-}
+NIL_ID :: ThingId{0, 0}
 
 Thing :: struct {
 	id:     ThingId,
@@ -20,7 +22,6 @@ Thing :: struct {
 	pos:    [2]f32,
 	size:   f32,
 }
-
 
 Things :: struct {
 	blobs:   [2][BLOB_SIZE_MB * 1_000_000]byte,
@@ -54,11 +55,6 @@ things_init :: proc(game: ^Game) {
 		thing.pos = entity.pos
 		thing.size = entity.size
 	}
-}
-
-ArenaAlloc :: struct {
-	arena:           mem.Arena,
-	using allocator: mem.Allocator,
 }
 
 Pass :: struct {

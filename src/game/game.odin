@@ -3,7 +3,6 @@ package game
 import "../csv"
 import "core:fmt"
 import "core:mem"
-import "core:strings"
 V2 :: [2]f32
 
 Rect :: struct {
@@ -69,6 +68,7 @@ BLACK: Color = {0, 0, 0, 1}
 RED: Color = {1, 0, 0, 1}
 GREEN: Color = {0, 1, 0, 1}
 BLUE: Color = {0, 0, 1, 1}
+YELLOW: Color = {1, 1, 0, 1}
 
 NUM_THINGS :: 32000
 STATIC_SIZE_MB :: 10
@@ -87,6 +87,7 @@ Game :: struct {
 	world_map:       World_Map,
 	tick_num:        u64,
 	things:          Things,
+	selected_id:     ThingId,
 }
 
 Rect_Gradient :: [4]Color
@@ -154,6 +155,12 @@ Drawable :: struct {
 	text:             DrawableText,
 }
 
+@(private = "file")
+Click_Box :: struct {
+	id:     ThingId,
+	bounds: Rect,
+}
+
 Asset_Id :: u32
 
 Asset_Def :: struct {
@@ -219,19 +226,31 @@ start :: proc(game: ^Game, assets: Assets) {
 }
 
 Platform_Input :: struct {
-	mouse_pos:     V2,
-	mouse_clicked: bool,
-	mouse_down:    bool,
-	fps:           f32,
+	mouse_pos_screen: V2,
+	mouse_pos_world:  V2,
+	mouse_clicked:    bool,
+	mouse_down:       bool,
+	fps:              f32,
 }
 
 update_and_render :: proc(arena: mem.Allocator, game: ^Game, input: Platform_Input) -> []Drawable {
 	tick(game)
 
-	drawables: [dynamic]Drawable = make_dynamic_array_len_cap([dynamic]Drawable, 0, 4096, arena)
-	draw_world(game, &drawables)
+	click_boxes: [dynamic]Click_Box = make([dynamic]Click_Box, 0, 1024, arena)
+	drawables: [dynamic]Drawable = make([dynamic]Drawable, 0, 4096, arena)
+	draw_world(game, &drawables, &click_boxes)
 
 	build_ui(arena, game, input, &drawables)
+
+	if !ui_is_mouse_over_area() && input.mouse_clicked {
+		game.selected_id = {}
+		for idx := len(click_boxes); idx > 0; idx -= 1 {
+			click_box := click_boxes[idx - 1]
+			if rect_contains_point(click_box.bounds, input.mouse_pos_world) {
+				game.selected_id = click_box.id
+			}
+		}
+	}
 
 	return drawables[:]
 }
@@ -239,24 +258,31 @@ update_and_render :: proc(arena: mem.Allocator, game: ^Game, input: Platform_Inp
 show_ui := true
 
 @(private = "file")
-draw_world :: proc(game: ^Game, drawables: ^[dynamic]Drawable) {
+draw_world :: proc(game: ^Game, drawables: ^[dynamic]Drawable, click_boxes: ^[dynamic]Click_Box) {
 	actve_idx := game.tick_num % 2
 	for &this in game.things.entries[actve_idx][1:] {
 		if !thing_id_is_valid(this.id) {continue}
+
 
 		pos := this.pos
 		size := this.size
 
 		drawable: Drawable
 
+		bounds: Rect = {pos.x - size / 2, pos.y - size / 2, size, size}
+
 		drawable = Drawable {
 			space            = .World,
-			bounds           = {pos.x - size / 2, pos.y - size / 2, size, size},
+			bounds           = bounds,
 			sprite           = this.sprite,
 			sprite_intensity = 1,
 			color            = WHITE,
+			stroke           = YELLOW,
+			thickness        = game.selected_id == this.id ? 4 : 0,
 		}
 		append(drawables, drawable)
+		append(click_boxes, Click_Box{this.id, bounds})
+
 
 		drawable = Drawable {
 			space = .World,
@@ -265,7 +291,7 @@ draw_world :: proc(game: ^Game, drawables: ^[dynamic]Drawable) {
 				content = this.name,
 				font = 0,
 				pixel_height = 24,
-				color = WHITE,
+				color = game.selected_id == this.id ? YELLOW : WHITE,
 				pos = .Center,
 				background = color_with_alpha(BLACK, 0.5),
 				padding = 4,

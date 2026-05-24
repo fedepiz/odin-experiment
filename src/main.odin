@@ -235,18 +235,19 @@ measure_text :: proc(text: string, font: ^FontData, pixel_height: f32) -> TextMe
 	return out
 }
 
-translate_draw_commands :: proc(
+process_drawables :: proc(
 	alloc: mem.Allocator,
-	commands: []game.Drawable,
+	drawables: []game.Drawable,
 	camera: Camera,
+	pick_pos: [2]f32,
 ) -> []DrawCommand {
-	out := make_dynamic_array_len_cap(
+	commands := make_dynamic_array_len_cap(
 		[dynamic]DrawCommand,
 		0,
-		2 * len(commands),
+		2 * len(drawables),
 		allocator = alloc,
 	)
-	for draw in commands {
+	for draw in drawables {
 		bounds := draw.bounds
 
 		switch (draw.space) {
@@ -307,7 +308,7 @@ translate_draw_commands :: proc(
 				radius        = draw.radius,
 				tex_intensity = draw.sprite_intensity,
 			}
-			append(&out, DrawCommand{element = elem, texture = texture})
+			append(&commands, DrawCommand{element = elem, texture = texture})
 		}
 
 		// Draw text, if present
@@ -346,7 +347,7 @@ translate_draw_commands :: proc(
 					color         = draw.text.background,
 					tex_intensity = 0,
 				}
-				append(&out, DrawCommand{element = element, texture = font.texture})
+				append(&commands, DrawCommand{element = element, texture = font.texture})
 			}
 
 			// Draw the letters one by one
@@ -386,12 +387,12 @@ translate_draw_commands :: proc(
 						size          = {q.x1 - q.x0, q.y1 - q.y0},
 						tex_intensity = 1,
 					}
-					append(&out, DrawCommand{element = element, texture = font.texture})
+					append(&commands, DrawCommand{element = element, texture = font.texture})
 				}
 			}
 		}
 	}
-	return out[:]
+	return commands[:]
 }
 
 batch_draw_commands :: proc(alloc: mem.Allocator, commands: []DrawCommand) -> []Batch {
@@ -869,6 +870,7 @@ main :: proc() {
 	camera.zoom = 4
 
 	current_time := glfw.GetTime()
+
 	for !glfw.WindowShouldClose(window) {
 		next_time := glfw.GetTime()
 		delta := f32(next_time - current_time)
@@ -894,18 +896,16 @@ main :: proc() {
 		gl.Clear(gl.COLOR_BUFFER_BIT)
 
 		input: game.Platform_Input = {
-			mouse_pos     = PLATFORM.mouse_pos,
-			mouse_clicked = is_button_pressed(glfw.MOUSE_BUTTON_LEFT),
-			mouse_down    = is_button_down(glfw.MOUSE_BUTTON_LEFT),
-			fps           = fps,
+			mouse_pos_screen = PLATFORM.mouse_pos,
+			mouse_pos_world  = camera_point_screen_to_world(
+				camera,
+				PLATFORM.mouse_pos,
+				PLATFORM.window_size,
+			),
+			mouse_clicked    = is_button_pressed(glfw.MOUSE_BUTTON_LEFT),
+			mouse_down       = is_button_down(glfw.MOUSE_BUTTON_LEFT),
+			fps              = fps,
 		}
-
-		drawables := game.update_and_render(frame_arena, game_state, input)
-
-		// end of frame
-		PLATFORM.key_down_prev = PLATFORM.key_down_now
-		PLATFORM.mouse_button_down_prev = PLATFORM.mouse_button_down_now
-
 
 		{
 			// Key actions
@@ -936,14 +936,18 @@ main :: proc() {
 			camera_zoom_by(&camera, 1.0 + dz * 2.5 * delta)
 		}
 
-		draw_terrain(camera)
+		drawables := game.update_and_render(frame_arena, game_state, input)
+		elements := process_drawables(frame_arena, drawables, camera, PLATFORM.mouse_pos)
 
-		{
-			elements := translate_draw_commands(frame_arena, drawables, camera)
-			batches := batch_draw_commands(frame_arena, elements)
-			for batch in batches {
-				draw_batch(batch)
-			}
+		// end of frame
+		PLATFORM.key_down_prev = PLATFORM.key_down_now
+		PLATFORM.mouse_button_down_prev = PLATFORM.mouse_button_down_now
+
+
+		draw_terrain(camera)
+		batches := batch_draw_commands(frame_arena, elements)
+		for batch in batches {
+			draw_batch(batch)
 		}
 
 		glfw.SwapBuffers(window)
