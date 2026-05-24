@@ -234,7 +234,7 @@ Platform_Input :: struct {
 }
 
 update_and_render :: proc(arena: mem.Allocator, game: ^Game, input: Platform_Input) -> []Drawable {
-	tick(game)
+	tick(game, {})
 
 	click_boxes: [dynamic]Click_Box = make([dynamic]Click_Box, 0, 1024, arena)
 	drawables: [dynamic]Drawable = make([dynamic]Drawable, 0, 4096, arena)
