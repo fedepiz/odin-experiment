@@ -15,18 +15,28 @@ ThingId :: struct {
 
 NIL_ID :: ThingId{0, 0}
 
+// Concept: the seq_num.
+// Each spawned thing, progressively, gets a sequence number (seq num).
+// This is used to pre-associate a spawn (and other commands) with the future spawn-ed id.
+// This is becasue at the time of a spawn, we do not yet know the target id.
+// So the ways to identify an entity are:
+// By id (allows fast random access)
+// By seq_num (no fast access)
+
 Thing :: struct {
-	id:     ThingId,
-	name:   string,
-	sprite: Asset_Id,
-	pos:    [2]f32,
-	size:   f32,
+	id:      ThingId,
+	seq_num: u64,
+	name:    string,
+	sprite:  Asset_Id,
+	pos:     [2]f32,
+	size:    f32,
 }
 
 Things :: struct {
-	blobs:   [2][BLOB_SIZE_MB * 1_000_000]byte,
-	arenas:  [2]mem.Arena,
-	entries: [2][NUM_THINGS]Thing,
+	blobs:        [2][BLOB_SIZE_MB * 1_000_000]byte,
+	arenas:       [2]mem.Arena,
+	entries:      [2][NUM_THINGS]Thing,
+	last_seq_num: u64,
 }
 
 
@@ -41,6 +51,7 @@ things_init :: proc(game: ^Game) {
 	entities: []Entity = {
 		{name = "Caer Ligualid", sprite = "celtic_town", pos = {300, 254}, size = 3},
 		{name = "Anava", sprite = "celtic_village", pos = {302, 248}, size = 2},
+		{name = "Test", sprite = "soldier", pos = {305, 248}, size = 1},
 	}
 
 	pass := make_pass(game)
