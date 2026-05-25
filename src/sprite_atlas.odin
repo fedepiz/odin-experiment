@@ -77,7 +77,7 @@ sprite_atlas_create :: proc(inpath: string, outpath: string) {
 
 	regions := make([dynamic]Sprite_Atlas_Region, 0, len(sprites), scratch.arena)
 
-	padding :: 4
+	padding :: 8
 	max_width :: 2048
 
 	x := padding

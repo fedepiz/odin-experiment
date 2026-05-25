@@ -34,6 +34,8 @@ Vertex :: struct {
 	thickness:     f32,
 	radius:        f32,
 	tex_intensity: f32,
+	rim_color:     [4]f32,
+	rim_thickness: f32,
 }
 
 VERTICES_MAX :: 1024
@@ -171,6 +173,26 @@ gl_init :: proc() {
 			size_of(Vertex), // stride
 			offset_of(Vertex, tex_intensity), // offset
 		)
+
+		gl.EnableVertexAttribArray(9)
+		gl.VertexAttribPointer(
+			9, // location
+			4, // 4 floats (vec4)
+			gl.FLOAT,
+			false, // no normalisation
+			size_of(Vertex), // stride
+			offset_of(Vertex, rim_color), // offset
+		)
+
+		gl.EnableVertexAttribArray(10)
+		gl.VertexAttribPointer(
+			10, // location
+			1, // 1 float
+			gl.FLOAT,
+			false, // no normalisation
+			size_of(Vertex), // stride
+			offset_of(Vertex, rim_thickness), // offset
+		)
 	}
 }
 
@@ -191,6 +213,8 @@ Element :: struct {
 	thickness:     f32,
 	radius:        f32,
 	tex_intensity: f32,
+	rim_color:     [4]f32,
+	rim_thickness: f32,
 }
 
 DrawCommand :: struct {
@@ -277,11 +301,13 @@ process_drawables :: proc(
 			reg_pos := [2]f32{f32(sprite.region[0]), f32(sprite.region[1])}
 			reg_size := [2]f32{f32(sprite.region[2]), f32(sprite.region[3])}
 			reg_min := reg_pos / texture.size
+			rim_thickness := draw.rim_thickness_px
 
 			st: [4][2]f32 = ---
 			switch (draw.sprite_mapping) {
 			case .Stretch:
 				reg_max := (reg_pos + reg_size) / texture.size
+				rim_thickness *= min(reg_size.x, reg_size.y) / min(bounds.w, bounds.h)
 				st = {
 					{reg_min.x, reg_min.y},
 					{reg_max.x, reg_min.y},
@@ -307,6 +333,8 @@ process_drawables :: proc(
 				thickness     = draw.thickness,
 				radius        = draw.radius,
 				tex_intensity = draw.sprite_intensity,
+				rim_color     = draw.rim_color,
+				rim_thickness = rim_thickness,
 			}
 			append(&commands, DrawCommand{element = elem, texture = texture})
 		}
@@ -463,6 +491,8 @@ draw_batch :: proc(batch: Batch) {
 				thickness     = elem.thickness,
 				radius        = elem.radius,
 				tex_intensity = elem.tex_intensity,
+				rim_color     = elem.rim_color,
+				rim_thickness = elem.rim_thickness,
 			}
 			append(&GL.vertices, vertex)
 		}
@@ -1011,6 +1041,8 @@ layout (location = 5) in vec4 a_stroke;
 layout (location = 6) in float a_thickness_px;
 layout (location = 7) in float a_radius_px;
 layout (location = 8) in float a_tex_intensity;
+layout (location = 9) in vec4 a_rim_color;
+layout (location = 10) in float a_rim_thickness_px;
 
 out vec2 v_uv;
 out vec2 v_st;
@@ -1020,6 +1052,8 @@ out vec4 v_stroke;
 out float v_thickness_px;
 out float v_radius_px;
 out float v_tex_intensity;
+out vec4 v_rim_color;
+out float v_rim_thickness_px;
 
 void main() {
 	gl_Position = vec4(a_xy, 0.0, 1.0);
@@ -1031,6 +1065,8 @@ void main() {
 	v_thickness_px = a_thickness_px;
 	v_radius_px = a_radius_px;
 	v_tex_intensity = a_tex_intensity;
+	v_rim_color = a_rim_color;
+	v_rim_thickness_px = a_rim_thickness_px;
 }
 `
 
@@ -1044,6 +1080,8 @@ in vec4 v_stroke;
 in float v_thickness_px;
 in float v_radius_px;
 in float v_tex_intensity;
+in vec4 v_rim_color;
+in float v_rim_thickness_px;
 
 out vec4 frag_color;
 
@@ -1055,10 +1093,52 @@ uniform sampler2D u_terrain_atlas;
 
 const int MODE_DEFAULT = 1;
 const int MODE_TERRAIN = 2;
+const int MAX_RIM_THICKNESS_PX = 8;
+const float RIM_ALPHA_THRESHOLD = 0.5;
 
 float RoundedBoxSDF(vec2 p, vec2 half_size, float radius) {
   vec2 q = abs(p) - half_size + vec2(radius);
   return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
+}
+
+vec4 sprite_rim(vec2 st) {
+	if (v_rim_thickness_px <= 0.0 || v_rim_color.a <= 0.0 || v_tex_intensity <= 0.0) {
+		return vec4(0.0);
+	}
+
+	float center_alpha = texture(u_texture, st).a;
+	if (center_alpha >= RIM_ALPHA_THRESHOLD) {
+		return vec4(0.0);
+	}
+
+	vec2 texel = 1.0 / vec2(textureSize(u_texture, 0));
+	float max_alpha = 0.00;
+	float rim_radius = min(v_rim_thickness_px, float(MAX_RIM_THICKNESS_PX));
+	int rim_radius_i = int(ceil(rim_radius));
+
+	for (int y = -MAX_RIM_THICKNESS_PX; y <= MAX_RIM_THICKNESS_PX; ++y) {
+		if (abs(y) > rim_radius_i) {
+			continue;
+		}
+
+		for (int x = -MAX_RIM_THICKNESS_PX; x <= MAX_RIM_THICKNESS_PX; ++x) {
+			if (abs(x) > rim_radius_i) {
+				continue;
+			}
+
+			vec2 offset = vec2(float(x), float(y));
+			float dist = length(offset);
+			if (dist > rim_radius) {
+				continue;
+			}
+
+			float sample_alpha = step(RIM_ALPHA_THRESHOLD, texture(u_texture, st + offset * texel).a);
+			float edge_weight = 1.0 - smoothstep(max(rim_radius - 1.0, 0.0), rim_radius, dist);
+			max_alpha = max(max_alpha, sample_alpha * edge_weight);
+		}
+	}
+
+	return vec4(v_rim_color.rgb, v_rim_color.a * max_alpha);
 }
 
 vec4 default_mode() {
@@ -1075,8 +1155,8 @@ vec4 default_mode() {
 	vec4 tex = texture(u_texture, v_st);
 	vec4 fill_col =  mix(v_col, tex * v_col, v_tex_intensity);
 	vec4 col = fill_col * mask_inner + v_stroke * stroke;
-
-	return col;
+	vec4 rim = sprite_rim(v_st);
+	return col + rim * (1.0 - col.a);
 }
 
 ivec2 terrain_tile_coord_from_key(ivec2 key_coord, ivec2 key_size, ivec2 atlas_tile_count) {
@@ -1233,4 +1313,3 @@ load_font_from_file :: proc(path: string) -> FontData {
 	}
 	return out
 }
-

@@ -152,6 +152,8 @@ Drawable :: struct {
 	sprite:           Asset_Id,
 	sprite_mapping:   SpriteMapping,
 	sprite_intensity: f32,
+	rim_color:        Color,
+	rim_thickness_px: f32,
 	text:             DrawableText,
 }
 
@@ -277,8 +279,8 @@ draw_world :: proc(game: ^Game, drawables: ^[dynamic]Drawable, click_boxes: ^[dy
 			sprite           = this.sprite,
 			sprite_intensity = 1,
 			color            = WHITE,
-			stroke           = YELLOW,
-			thickness        = game.selected_id == this.id ? 4 : 0,
+			rim_color        = YELLOW,
+			rim_thickness_px = game.selected_id == this.id ? 6 : 0,
 		}
 		append(drawables, drawable)
 		append(click_boxes, Click_Box{this.id, bounds})
@@ -384,4 +386,3 @@ build_ui :: proc(
 
 	ui_end(drawables)
 }
-
