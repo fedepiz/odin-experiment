@@ -5,6 +5,14 @@ import "core:fmt"
 import "core:mem"
 V2 :: [2]f32
 
+v2_magnitude :: proc(a: V2) -> f32 {
+	return a.x * a.x + a.y * a.y
+}
+
+v2_euclid_dist :: proc(a: V2, b: V2) -> f32 {
+	return v2_magnitude(a - b)
+}
+
 Rect :: struct {
 	x: f32,
 	y: f32,
@@ -369,20 +377,9 @@ build_ui :: proc(
 			ui_hspace()
 		}
 
-		// ui_vspace()
-
-		// {
-		// 	ui_row()
-		// 	ui_hspace()
-		// 	sb := strings.builder_make(arena)
-		// 	fmt.sbprintf(&sb, "FPS: %d", int(input.fps))
-		// 	text := strings.to_string(sb)
-		// 	ui_label(text, 6)
-		// 	ui_hspace()
-		// }
-
 		ui_vspace()
 	}
 
 	ui_end(drawables)
 }
+

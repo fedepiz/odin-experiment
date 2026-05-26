@@ -2,7 +2,6 @@
 package game
 
 import "../util"
-import "core:fmt"
 import "core:mem"
 import "core:strings"
 
@@ -27,12 +26,19 @@ NIL_ID :: ThingId{0, 0}
 SpawnSeqNum :: distinct u32
 
 Thing :: struct {
-	id:      ThingId,
-	seq_num: SpawnSeqNum,
-	name:    string,
-	sprite:  Asset_Id,
-	pos:     [2]f32,
-	size:    f32,
+	id:       ThingId,
+	seq_num:  SpawnSeqNum,
+	name:     string,
+	sprite:   Asset_Id,
+	pos:      [2]f32,
+	size:     f32,
+	movement: Movement,
+}
+
+Movement :: struct {
+	active: bool,
+	target: ThingId,
+	pos:    V2,
 }
 
 Things :: struct {
@@ -68,10 +74,13 @@ things_init :: proc(game: ^Game) {
 	for entity, idx in entities {
 		target := SpawnSeqNum(idx + 1)
 		append(&commands, Tick_Command{kind = .Spawn})
-		append(&commands, Tick_Command{kind = .SetName, target = target, string = entity.name})
-		append(&commands, Tick_Command{kind = .SetSprite, target = target, string = entity.sprite})
-		append(&commands, Tick_Command{kind = .SetPos, target = target, nums = entity.pos})
-		append(&commands, Tick_Command{kind = .SetSize, target = target, nums = {entity.size, 0}})
+		append(&commands, Tick_Command{kind = .SetName, subject = target, string = entity.name})
+		append(
+			&commands,
+			Tick_Command{kind = .SetSprite, subject = target, string = entity.sprite},
+		)
+		append(&commands, Tick_Command{kind = .SetPos, subject = target, nums = entity.pos})
+		append(&commands, Tick_Command{kind = .SetSize, subject = target, nums = {entity.size, 0}})
 	}
 
 	tick(game, commands[:])
@@ -94,12 +103,18 @@ make_pass :: proc(game: ^Game) -> Pass {
 	return out
 }
 
+pass_get_old :: proc(pass: ^Pass, id: ThingId) -> ^Thing {
+	thing := &pass.old_things[id.generation]
+	return thing.id.generation == id.generation ? thing : &pass.old_things[0]
+}
+
 Tick_Command :: struct {
-	kind:   Tick_Command_Kind,
-	target: Tick_Command_Target,
+	kind:    Tick_Command_Kind,
+	subject: Tick_Command_ThingRef,
 	// Arguments, if any
-	string: string,
-	nums:   [2]f32,
+	target:  Tick_Command_ThingRef,
+	string:  string,
+	nums:    [2]f32,
 }
 
 Tick_Command_Kind :: enum {
@@ -112,7 +127,7 @@ Tick_Command_Kind :: enum {
 
 No_Target :: struct {}
 
-Tick_Command_Target :: union {
+Tick_Command_ThingRef :: union {
 	No_Target,
 	ThingId,
 	SpawnSeqNum,
@@ -133,7 +148,7 @@ tick :: proc(game: ^Game, commands: []Tick_Command) {
 	}
 
 	// Write step
-	for idx in 1 ..< len(pass.new_things) {
+	for idx in 1 ..< NUM_THINGS {
 		old := &pass.old_things[idx]
 		new := &pass.new_things[idx]
 		// Clone over parts that need to be copied
@@ -151,15 +166,19 @@ tick :: proc(game: ^Game, commands: []Tick_Command) {
 		}
 
 		new_name := old.name
+
 		new.sprite = old.sprite
 		// Body
 		new.pos = old.pos
 		new.size = old.size
 
+		// Copy over movement
+		new.movement = old.movement
+
 		// Apply commands
 		for &cmd in commands {
 			targets_me := false
-			switch v in cmd.target {
+			switch v in cmd.subject {
 			case No_Target:
 			case ThingId:
 				targets_me = new.id == v
@@ -185,6 +204,19 @@ tick :: proc(game: ^Game, commands: []Tick_Command) {
 		// Name & stuff
 		new.name = strings.clone(new_name, pass.alloc)
 
+		// Update position/movement
+		if new.movement.active {
+			// Update target movement position
+			if new.movement.target != NIL_ID {
+				new.movement.pos = pass_get_old(&pass, new.movement.target).pos
+			}
+
+			diff := new.movement.pos - new.pos
+			mag := v2_magnitude(diff)
+			norm := diff / mag
+			dv := norm * 1.0
+			new.pos += dv
+		}
 	}
 }
 
